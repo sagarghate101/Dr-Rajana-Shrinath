@@ -164,7 +164,6 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
 </head>
 <body>
 
-<!-- LOGIN SCREEN -->
 <div id="login-screen">
   <div class="login-box">
     <div class="login-brand">
@@ -196,12 +195,9 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
   </div>
 </div>
 
-<!-- MAIN APP -->
 <div id="app" class="hidden">
-  <!-- Mobile Overlay -->
   <div id="mobile-overlay" onclick="closeSidebar()"></div>
 
-  <!-- SIDEBAR -->
   <aside id="sidebar">
     <div class="sidebar-brand">
       <div class="brand-icon">🏥</div>
@@ -223,7 +219,6 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
     </div>
   </aside>
 
-  <!-- MAIN AREA -->
   <div id="main-area">
     <header id="topbar">
       <div class="topbar-left">
@@ -239,11 +234,12 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
   </div>
 </div>
 
-<!-- MODAL CONTAINER -->
 <div id="modal-container"></div>
 
 <script>
 // ==================== DATA LAYER ====================
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxsVI5Iz02B4I9pPh4laVolbiq-4dTe5CBbz7IythIyifkdeYEYfBGmwXxhO-J_R_DK/exec";
+
 const KEYS={
   PATIENTS:'hom_patients',CASES:'hom_cases',COURIERS:'hom_couriers',
   BILLING:'hom_billing',APPOINTMENTS:'hom_appointments',MEDICINES:'hom_medicines',
@@ -263,7 +259,7 @@ function initDB(){
   if(!ls(KEYS.COURIERS)) ss(KEYS.COURIERS,[]);
   if(!ls(KEYS.BILLING)) ss(KEYS.BILLING,[]);
   if(!ls(KEYS.APPOINTMENTS)) ss(KEYS.APPOINTMENTS,[]);
-  if(!ls(KEYS.SYNC)) ss(KEYS.SYNC,{url:'',enabled:false});
+  if(!ls(KEYS.SYNC)) ss(KEYS.SYNC,{url:'',enabled:true});
   if(!ls(KEYS.SETTINGS)) ss(KEYS.SETTINGS,{clinicName:"Dr. Sharma's Homeopathy Clinic",doctorName:"Dr. Anjali Sharma",doctorPin:"1234",receptionistName:"Neha Deshmukh",receptionistPin:"4321"});
 }
 
@@ -284,6 +280,121 @@ const DEFAULT_MEDICINES=[
   {id:'MED-014',name:'Sepia',potency:'200C',stock:5,minStock:3,category:'Dilution',price:170},
   {id:'MED-015',name:'Thuja',potency:'1M',stock:3,minStock:2,category:'Dilution',price:210},
 ];
+
+// ==================== AUTO SYNCHRONIZATION ARCHITECTURE ====================
+function mergeCollections(local, remote, key = 'id') {
+  const lookups = new Map();
+  remote.forEach(item => { if (item && item[key]) lookups.set(item[key], item); });
+  local.forEach(item => {
+    if (item && item[key]) {
+      if (!lookups.has(item[key])) {
+        lookups.set(item[key], item);
+      } else {
+        lookups.set(item[key], Object.assign({}, lookups.get(item[key]), item));
+      }
+    }
+  });
+  return Array.from(lookups.values());
+}
+
+async function loadFromGoogleSheets() {
+  if (!navigator.onLine) {
+    updateSyncBadge();
+    return;
+  }
+  try {
+    const response = await fetch(WEB_APP_URL + "?action=get_data");
+    if (!response.ok) throw new Error("Network error loading remote parameters");
+    const remoteData = await response.json();
+    if (remoteData) {
+      if (Array.isArray(remoteData.patients)) saveAll(KEYS.PATIENTS, remoteData.patients);
+      if (Array.isArray(remoteData.cases)) saveAll(KEYS.CASES, remoteData.cases);
+      if (Array.isArray(remoteData.couriers)) saveAll(KEYS.COURIERS, remoteData.couriers);
+      if (Array.isArray(remoteData.billing)) saveAll(KEYS.BILLING, remoteData.billing);
+      if (Array.isArray(remoteData.appointments)) saveAll(KEYS.APPOINTMENTS, remoteData.appointments);
+      if (Array.isArray(remoteData.medicines)) saveAll(KEYS.MEDICINES, remoteData.medicines);
+      
+      const currentSyncObj = ls(KEYS.SYNC) || {};
+      currentSyncObj.lastSync = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      ss(KEYS.SYNC, currentSyncObj);
+    }
+    updateSyncBadge();
+    if (!document.getElementById('app').classList.contains('hidden')) {
+      renderView();
+    }
+  } catch (error) {
+    console.warn("Sync failed, operating locally:", error);
+    updateSyncBadge();
+  }
+}
+
+async function syncToGoogleSheets() {
+  if (!navigator.onLine) {
+    updateSyncBadge();
+    return;
+  }
+  try {
+    let freshRemoteState = {};
+    try {
+      const ping = await fetch(WEB_APP_URL + "?action=get_data");
+      if (ping.ok) freshRemoteState = await ping.json();
+    } catch(e) {
+      console.warn("Pre-fetch failed, forcing fast merge sync mode");
+    }
+
+    const mergedPatients = mergeCollections(getAll(KEYS.PATIENTS), freshRemoteState.patients || [], 'id');
+    const mergedCases = mergeCollections(getAll(KEYS.CASES), freshRemoteState.cases || [], 'id');
+    const mergedCouriers = mergeCollections(getAll(KEYS.COURIERS), freshRemoteState.couriers || [], 'id');
+    const mergedBilling = mergeCollections(getAll(KEYS.BILLING), freshRemoteState.billing || [], 'id');
+    const mergedAppointments = mergeCollections(getAll(KEYS.APPOINTMENTS), freshRemoteState.appointments || [], 'id');
+    const mergedMedicines = mergeCollections(getAll(KEYS.MEDICINES), freshRemoteState.medicines || [], 'id');
+
+    saveAll(KEYS.PATIENTS, mergedPatients);
+    saveAll(KEYS.CASES, mergedCases);
+    saveAll(KEYS.COURIERS, mergedCouriers);
+    saveAll(KEYS.BILLING, mergedBilling);
+    saveAll(KEYS.APPOINTMENTS, mergedAppointments);
+    saveAll(KEYS.MEDICINES, mergedMedicines);
+
+    const completePayload = {
+      action: "sync_all",
+      patients: mergedPatients,
+      cases: mergedCases,
+      couriers: mergedCouriers,
+      billing: mergedBilling,
+      appointments: mergedAppointments,
+      medicines: mergedMedicines
+    };
+
+    await fetch(WEB_APP_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(completePayload)
+    });
+
+    await loadFromGoogleSheets();
+  } catch (err) {
+    console.error("Critical upload transaction dropped:", err);
+    updateSyncBadge();
+  }
+}
+
+function manualSync() {
+  loadFromGoogleSheets();
+}
+
+function triggerSync() {
+  syncToGoogleSheets();
+}
+
+window.addEventListener('online', () => {
+  syncToGoogleSheets();
+});
+window.addEventListener('offline', () => {
+  updateSyncBadge();
+});
+setInterval(loadFromGoogleSheets, 30000);
 
 // ==================== AUTH ====================
 let currentUser=null;
@@ -386,20 +497,37 @@ function closeSidebar(){
 }
 
 // ==================== APP START ====================
-function startApp(){
+async function startApp(){
   initDB();
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   buildNav();
-  renderView();
   updateSyncBadge();
+  await loadFromGoogleSheets();
+  renderView();
 }
 
 function updateSyncBadge(){
-  const cfg=ls(KEYS.SYNC)||{};
   const el=document.getElementById('sync-badge');
-  if(cfg.enabled&&cfg.lastSync){el.textContent='Synced: '+cfg.lastSync;el.style.display='';}
-  else el.style.display='none';
+  if(!el) return;
+  if(!navigator.onLine){
+    el.textContent='⚠️ Offline Mode';
+    el.style.display='';
+    el.style.background='var(--rose-50)';
+    el.style.color='var(--rose-700)';
+    el.style.borderColor='var(--rose-100)';
+    return;
+  }
+  const sync=ls(KEYS.SYNC)||{};
+  if(sync.enabled&&sync.lastSync){
+    el.textContent='Synced: '+sync.lastSync;
+    el.style.display='';
+    el.style.background='var(--emerald-50)';
+    el.style.color='var(--emerald-700)';
+    el.style.borderColor='var(--emerald-100)';
+  } else {
+    el.style.display='none';
+  }
 }
 
 function renderView(){
@@ -475,7 +603,6 @@ function renderDashboard(){
   </div>
 
   <div class="grid-2" style="margin-bottom:20px;">
-    <!-- Today Follow-ups -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="font-size:14px;font-weight:800;color:var(--slate-800);">📅 Today's Follow-ups</div>
@@ -495,7 +622,6 @@ function renderDashboard(){
       }).join('')}
     </div>
 
-    <!-- Missed Follow-ups -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="font-size:14px;font-weight:800;color:var(--slate-800);">⚠️ Overdue Follow-ups</div>
@@ -517,7 +643,6 @@ function renderDashboard(){
     </div>
   </div>
 
-  <!-- Pending Couriers Quick View -->
   ${pendingCouriers>0?`<div class="card" style="margin-bottom:20px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
       <div style="font-size:14px;font-weight:800;color:var(--slate-800);">📦 Pending Courier Dispatch</div>
@@ -647,7 +772,7 @@ function showAddPatient(){
   </div>`);
 }
 
-function savePatient(){
+async function savePatient(){
   const name=document.getElementById('p-name').value.trim();
   const mobile=document.getElementById('p-mobile').value.trim();
   const age=document.getElementById('p-age').value.trim();
@@ -660,8 +785,8 @@ function savePatient(){
   const p={id,name,mobile,age:parseInt(age),gender,address:document.getElementById('p-address').value,occupation:document.getElementById('p-occupation').value,bloodGroup:document.getElementById('p-blood').value,createdAt:today()};
   patients.unshift(p);
   saveAll(KEYS.PATIENTS,patients);
-  triggerSync();
   closeModal();
+  await syncToGoogleSheets();
   renderPatients();
 }
 
@@ -742,7 +867,7 @@ function showEditPatient(pid){
   </div>`);
 }
 
-function updatePatient(pid){
+async function updatePatient(pid){
   const patients=getAll(KEYS.PATIENTS);
   const idx=patients.findIndex(p=>p.id===pid);
   if(idx===-1)return;
@@ -756,8 +881,8 @@ function updatePatient(pid){
     bloodGroup:document.getElementById('ep-blood').value,
   };
   saveAll(KEYS.PATIENTS,patients);
-  triggerSync();
   closeModal();
+  await syncToGoogleSheets();
   renderPatients();
 }
 
@@ -796,9 +921,10 @@ function showMedHistory(pid){
   </div>`);
 }
 
-function saveMedHistory(pid){
+async function saveMedHistory(pid){
   const cases=getAll(KEYS.CASES);
   const entry={patientId:pid,date:today(),type:'history',
+    id:'HIS-'+Date.now(),
     complaint:document.getElementById('mh-complaint').value,
     symptoms:document.getElementById('mh-symptoms').value,
     duration:document.getElementById('mh-duration').value,
@@ -816,6 +942,7 @@ function saveMedHistory(pid){
   cases.unshift(entry);
   saveAll(KEYS.CASES,cases);
   closeModal();
+  await syncToGoogleSheets();
   alert('Medical history saved!');
 }
 
@@ -840,7 +967,6 @@ function renderConsult(){
   </div>
 
   <div class="card">
-    <!-- Patient Select -->
     <div class="form-group">
       <label class="label">Patient *</label>
       <input class="input" id="c-search" placeholder="Search patient by name or mobile..." oninput="searchConsultPatient()" autocomplete="off"/>
@@ -849,7 +975,6 @@ function renderConsult(){
       <div id="c-selected" class="hidden" style="margin-top:8px;padding:10px;background:var(--teal-50);border:1px solid var(--teal-100);border-radius:10px;font-size:12px;font-weight:700;color:var(--teal-700);"></div>
     </div>
 
-    <!-- Visit Type -->
     <div class="form-group">
       <label class="label">Visit Type *</label>
       <div style="display:flex;gap:10px;">
@@ -862,7 +987,6 @@ function renderConsult(){
       </div>
     </div>
 
-    <!-- Complaint & Observations -->
     <div class="grid-2">
       <div class="form-group">
         <label class="label">Chief Complaint *</label>
@@ -878,7 +1002,6 @@ function renderConsult(){
       <textarea class="input" id="c-notes" rows="3" placeholder="Doctor's observations, symptoms detail..."></textarea>
     </div>
 
-    <!-- Prescription -->
     <div class="divider"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <div style="font-size:13px;font-weight:800;color:var(--slate-700);">💊 Prescription</div>
@@ -889,7 +1012,6 @@ function renderConsult(){
       Search from medicine list or type custom name. Add multiple medicines.
     </div>
 
-    <!-- Follow-up & Payment -->
     <div class="divider"></div>
     <div class="grid-2">
       <div class="form-group">
@@ -919,7 +1041,6 @@ function renderConsult(){
       </div>
     </div>
 
-    <!-- Online: Courier -->
     <div id="courier-section" class="hidden">
       <div class="divider"></div>
       <div style="font-size:13px;font-weight:800;color:var(--slate-700);margin-bottom:12px;">📦 Courier Details (Online Patient)</div>
@@ -1037,7 +1158,7 @@ function collectRx(){
   return rxs;
 }
 
-function saveConsult(){
+async function saveConsult(){
   const pid=document.getElementById('c-pid').value;
   const complaint=document.getElementById('c-complaint').value.trim();
   const err=document.getElementById('c-err');
@@ -1093,8 +1214,8 @@ function saveConsult(){
     saveAll(KEYS.COURIERS,couriers);
   }
 
-  triggerSync();
   navParam=null;
+  await syncToGoogleSheets();
   navigate('patients');
   setTimeout(()=>alert('✅ Consultation saved successfully!'),100);
 }
@@ -1165,7 +1286,6 @@ function renderCourierList(couriers){
         <span class="badge ${isDone?'badge-emerald':sIdx>=3?'badge-indigo':'badge-amber'}">${c.status}</span>
       </div>
 
-      <!-- Pipeline Steps -->
       <div class="pipeline-steps" style="margin-bottom:12px;">
         ${COURIER_PIPELINE.map((s,i)=>`
           <div class="pipeline-step">
@@ -1189,7 +1309,7 @@ function renderCourierList(couriers){
   }).join('');
 }
 
-function progressCourier(id){
+async function progressCourier(id){
   const couriers=getAll(KEYS.COURIERS);
   const idx=couriers.findIndex(c=>c.id===id);
   if(idx===-1)return;
@@ -1199,7 +1319,7 @@ function progressCourier(id){
     if(couriers[idx].status==='Courier Dispatched')couriers[idx].dispatchDate=today();
     if(couriers[idx].status==='Delivered')couriers[idx].deliveryDate=today();
     saveAll(KEYS.COURIERS,couriers);
-    triggerSync();
+    await syncToGoogleSheets();
     renderCourier();
   }
 }
@@ -1228,7 +1348,7 @@ function showCourierEdit(id){
   </div>`);
 }
 
-function saveCourierEdit(id){
+async function saveCourierEdit(id){
   const couriers=getAll(KEYS.COURIERS);
   const idx=couriers.findIndex(c=>c.id===id);
   if(idx===-1)return;
@@ -1236,8 +1356,8 @@ function saveCourierEdit(id){
   couriers[idx].tracking=document.getElementById('ce-tracking').value;
   couriers[idx].notes=document.getElementById('ce-notes').value;
   saveAll(KEYS.COURIERS,couriers);
-  triggerSync();
   closeModal();
+  await syncToGoogleSheets();
   renderCourier();
 }
 
@@ -1327,10 +1447,15 @@ function renderBillList(bills){
   </div>`).join('');
 }
 
-function markPaid(id){
+async function markPaid(id){
   const bills=getAll(KEYS.BILLING);
   const idx=bills.findIndex(b=>b.id===id);
-  if(idx!==-1){bills[idx].paymentStatus='Paid';saveAll(KEYS.BILLING,bills);triggerSync();renderBilling();}
+  if(idx!==-1){
+    bills[idx].paymentStatus='Paid';
+    saveAll(KEYS.BILLING,bills);
+    await syncToGoogleSheets();
+    renderBilling();
+  }
 }
 
 // ==================== INVENTORY ====================
@@ -1416,7 +1541,7 @@ function showAddMedicine(){
   </div>`);
 }
 
-function saveMedicine(){
+async function saveMedicine(){
   const name=document.getElementById('am-name').value.trim();
   if(!name)return alert('Medicine name required!');
   const meds=getAll(KEYS.MEDICINES);
@@ -1429,8 +1554,8 @@ function saveMedicine(){
     price:parseFloat(document.getElementById('am-price').value)||0,
   });
   saveAll(KEYS.MEDICINES,meds);
-  triggerSync();
   closeModal();
+  await syncToGoogleSheets();
   renderInventory();
 }
 
@@ -1455,14 +1580,14 @@ function showEditMed(id){
   </div>`);
 }
 
-function updateMed(id){
+async function updateMed(id){
   const meds=getAll(KEYS.MEDICINES);
   const idx=meds.findIndex(m=>m.id===id);
   if(idx===-1)return;
   meds[idx]={...meds[idx],name:document.getElementById('em-name').value,potency:document.getElementById('em-potency').value,stock:parseInt(document.getElementById('em-stock').value)||0,minStock:parseInt(document.getElementById('em-min').value)||5,price:parseFloat(document.getElementById('em-price').value)||0};
   saveAll(KEYS.MEDICINES,meds);
-  triggerSync();
   closeModal();
+  await syncToGoogleSheets();
   renderInventory();
 }
 
@@ -1546,7 +1671,7 @@ function showAddAppointment(){
   </div>`);
 }
 
-function saveAppt(){
+async function saveAppt(){
   const pname=document.getElementById('na-pname').value.trim();
   const date=document.getElementById('na-date').value;
   if(!pname||!date)return alert('Name and date required!');
@@ -1561,21 +1686,25 @@ function saveAppt(){
     notes:document.getElementById('na-notes').value
   });
   saveAll(KEYS.APPOINTMENTS,appts);
-  triggerSync();
   closeModal();
+  await syncToGoogleSheets();
   renderAppointments();
 }
 
-function updateApptStatus(id,status){
+async function updateApptStatus(id,status){
   const appts=getAll(KEYS.APPOINTMENTS);
   const idx=appts.findIndex(a=>a.id===id);
-  if(idx!==-1){appts[idx].status=status;saveAll(KEYS.APPOINTMENTS,appts);triggerSync();renderAppointments();}
+  if(idx!==-1){
+    appts[idx].status=status;
+    saveAll(KEYS.APPOINTMENTS,appts);
+    await syncToGoogleSheets();
+    renderAppointments();
+  }
 }
 
 // ==================== SETTINGS ====================
 function renderSettings(){
   const cfg=ls(KEYS.SETTINGS)||{};
-  const sync=ls(KEYS.SYNC)||{};
   document.getElementById('content').innerHTML=`
   <div style="margin-bottom:20px;">
     <div class="section-title">⚙️ Settings</div>
@@ -1599,26 +1728,18 @@ function renderSettings(){
 
   <div class="card">
     <div style="font-size:14px;font-weight:800;color:var(--slate-700);margin-bottom:8px;">📊 Google Sheets Sync</div>
-    <div style="font-size:12px;color:var(--slate-500);margin-bottom:16px;">Data locally saves on this device. Enable sync to backup to Google Sheets automatically.</div>
+    <div style="font-size:12px;color:var(--slate-500);margin-bottom:16px;">Data locally saves on this device. Fully functional cross-device synchronization pipeline is enabled active.</div>
     <div class="form-group"><label class="label">Apps Script Web App URL</label>
-      <input class="input" id="cfg-syncurl" value="${sync.url||''}" placeholder="https://script.google.com/macros/s/.../exec"/>
+      <input class="input" id="cfg-syncurl" value="${WEB_APP_URL}" disabled style="background:var(--slate-100);color:var(--slate-500);font-family:monospace;font-size:11px;"/>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;">
-        <input type="checkbox" id="cfg-sync-enabled" ${sync.enabled?'checked':''} style="width:16px;height:16px;accent-color:var(--teal-600);"/>
-        Enable Auto Sync on Save
-      </label>
-    </div>
-    ${sync.lastSync?`<div class="alert alert-success" style="margin-bottom:12px;">✅ Last synced: ${sync.lastSync}</div>`:''}
-    <div style="display:flex;gap:10px;">
-      <button class="btn btn-primary" onclick="saveSyncConfig()">💾 Save Sync Config</button>
-      <button class="btn btn-secondary" onclick="manualSync()">🔄 Sync Now</button>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn btn-primary" onclick="manualSync()">🔄 Sync Now</button>
     </div>
   </div>
   `;
 }
 
-function saveSettings(){
+async function saveSettings(){
   const cfg={
     clinicName:document.getElementById('cfg-clinic').value,
     doctorName:document.getElementById('cfg-doctor').value,
@@ -1628,40 +1749,8 @@ function saveSettings(){
   };
   ss(KEYS.SETTINGS,cfg);
   document.getElementById('sb-clinic-name').textContent=cfg.clinicName||'Clinic';
+  await syncToGoogleSheets();
   alert('✅ Settings saved! New PINs active from next login.');
-}
-
-function saveSyncConfig(){
-  const sync={url:document.getElementById('cfg-syncurl').value,enabled:document.getElementById('cfg-sync-enabled').checked};
-  ss(KEYS.SYNC,sync);
-  updateSyncBadge();
-  alert('✅ Sync config saved!');
-}
-
-async function manualSync(){
-  const sync=ls(KEYS.SYNC)||{};
-  if(!sync.url||!sync.enabled){alert('Please enter Apps Script URL and enable sync first.');return;}
-  try{
-    const payload={action:'sync_all',timestamp:new Date().toISOString(),
-      patients:getAll(KEYS.PATIENTS),cases:getAll(KEYS.CASES),
-      couriers:getAll(KEYS.COURIERS),billing:getAll(KEYS.BILLING),
-      appointments:getAll(KEYS.APPOINTMENTS),medicines:getAll(KEYS.MEDICINES)};
-    await fetch(sync.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    sync.lastSync=new Date().toLocaleString('en-IN');
-    ss(KEYS.SYNC,sync);
-    updateSyncBadge();
-    renderSettings();
-    alert('✅ Sync completed!');
-  }catch(e){alert('⚠️ Sync attempted (no-cors mode). Check your Apps Script URL.');}
-}
-
-function triggerSync(){
-  const sync=ls(KEYS.SYNC)||{};
-  if(!sync.url||!sync.enabled)return;
-  const payload={action:'sync_delta',timestamp:new Date().toISOString(),
-    patients:getAll(KEYS.PATIENTS),cases:getAll(KEYS.CASES),
-    couriers:getAll(KEYS.COURIERS),billing:getAll(KEYS.BILLING)};
-  fetch(sync.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{});
 }
 
 // ==================== MODAL ====================
