@@ -164,6 +164,7 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
 </head>
 <body>
 
+<!-- LOGIN SCREEN -->
 <div id="login-screen">
   <div class="login-box">
     <div class="login-brand">
@@ -195,9 +196,12 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
   </div>
 </div>
 
+<!-- MAIN APP -->
 <div id="app" class="hidden">
+  <!-- Mobile Overlay -->
   <div id="mobile-overlay" onclick="closeSidebar()"></div>
 
+  <!-- SIDEBAR -->
   <aside id="sidebar">
     <div class="sidebar-brand">
       <div class="brand-icon">🏥</div>
@@ -219,6 +223,7 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
     </div>
   </aside>
 
+  <!-- MAIN AREA -->
   <div id="main-area">
     <header id="topbar">
       <div class="topbar-left">
@@ -234,17 +239,16 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
   </div>
 </div>
 
+<!-- MODAL CONTAINER -->
 <div id="modal-container"></div>
 
 <script>
 // ==================== DATA LAYER ====================
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxsVI5Iz02B4I9pPh4laVolbiq-4dTe5CBbz7IythIyifkdeYEYfBGmwXxhO-J_R_DK/exec";
-
 const KEYS={
   PATIENTS:'hom_patients',CASES:'hom_cases',COURIERS:'hom_couriers',
   BILLING:'hom_billing',APPOINTMENTS:'hom_appointments',MEDICINES:'hom_medicines',
-  USER:'hom_user',SETTINGS:'hom_settings',OFFLINE_QUEUE:'hom_offline_queue',
-  LAST_MODAL:'hom_last_modal_state'
+  USER:'hom_user',SYNC:'hom_sync',SETTINGS:'hom_settings',
+  OFFLINE_QUEUE:'hom_offline_queue'
 };
 
 function ls(key){try{return JSON.parse(localStorage.getItem(key)||'null');}catch{return null;}}
@@ -264,176 +268,127 @@ function initDB(){
   if(!ls(KEYS.SETTINGS)) ss(KEYS.SETTINGS,{clinicName:"Dr. Sharma's Homeopathy Clinic",doctorName:"Dr. Anjali Sharma",doctorPin:"1234",receptionistName:"Neha Deshmukh",receptionistPin:"4321"});
 }
 
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxsVI5Iz02B4I9pPh4laVolbiq-4dTe5CBbz7IythIyifkdeYEYfBGmwXxhO-J_R_DK/exec";
+
 const DEFAULT_MEDICINES=[
-  {MedicineID:'MED-001',name:'Arsenicum Album',potency:'30C',stock:15,minStock:5,category:'Dilution',price:150,lastUpdated:Date.now()},
-  {MedicineID:'MED-002',name:'Nux Vomica',potency:'200C',stock:8,minStock:5,category:'Dilution',price:180,lastUpdated:Date.now()},
-  {MedicineID:'MED-003',name:'Pulsatilla',potency:'30C',stock:12,minStock:4,category:'Dilution',price:150,lastUpdated:Date.now()},
-  {MedicineID:'MED-004',name:'Sulphur',potency:'200C',stock:8,minStock:3,category:'Dilution',price:160,lastUpdated:Date.now()},
-  {MedicineID:'MED-005',name:'Arnica Montana',potency:'Q',stock:20,minStock:6,category:'Mother Tincture',price:250,lastUpdated:Date.now()},
-  {MedicineID:'MED-006',name:'Lycopodium',potency:'1M',stock:5,minStock:5,category:'Dilution',price:220,lastUpdated:Date.now()},
-  {MedicineID:'MED-007',name:'Silicea',potency:'6X',stock:25,minStock:10,category:'Biochemic',price:120,lastUpdated:Date.now()},
-  {MedicineID:'MED-008',name:'Belladonna',potency:'30C',stock:10,minStock:4,category:'Dilution',price:140,lastUpdated:Date.now()},
-  {MedicineID:'MED-009',name:'Rhus Toxicodendron',potency:'200C',stock:7,minStock:3,category:'Dilution',price:170,lastUpdated:Date.now()},
-  {MedicineID:'MED-010',name:'Calcarea Carb',potency:'200C',stock:6,minStock:3,category:'Dilution',price:180,lastUpdated:Date.now()},
-  {MedicineID:'MED-011',name:'Natrum Mur',potency:'30C',stock:9,minStock:4,category:'Dilution',price:150,lastUpdated:Date.now()},
-  {MedicineID:'MED-012',name:'Phosphorus',potency:'200C',stock:4,minStock:3,category:'Dilution',price:190,lastUpdated:Date.now()},
-  {MedicineID:'MED-013',name:'Ignatia',potency:'200C',stock:6,minStock:3,category:'Dilution',price:160,lastUpdated:Date.now()},
-  {MedicineID:'MED-014',name:'Sepia',potency:'200C',stock:5,minStock:3,category:'Dilution',price:170,lastUpdated:Date.now()},
-  {MedicineID:'MED-015',name:'Thuja',potency:'1M',stock:3,minStock:2,category:'Dilution',price:210,lastUpdated:Date.now()}
+  {MedicineID:'MED-001',name:'Arsenicum Album',potency:'30C',stock:15,minStock:5,category:'Dilution',price:150},
+  {MedicineID:'MED-002',name:'Nux Vomica',potency:'200C',stock:8,minStock:5,category:'Dilution',price:180},
+  {MedicineID:'MED-003',name:'Pulsatilla',potency:'30C',stock:12,minStock:4,category:'Dilution',price:150},
+  {MedicineID:'MED-004',name:'Sulphur',potency:'200C',stock:8,minStock:3,category:'Dilution',price:160},
+  {MedicineID:'MED-005',name:'Arnica Montana',potency:'Q',stock:20,minStock:6,category:'Mother Tincture',price:250},
+  {MedicineID:'MED-006',name:'Lycopodium',potency:'1M',stock:5,minStock:5,category:'Dilution',price:220},
+  {MedicineID:'MED-007',name:'Silicea',potency:'6X',stock:25,minStock:10,category:'Biochemic',price:120},
+  {MedicineID:'MED-008',name:'Belladonna',potency:'30C',stock:10,minStock:4,category:'Dilution',price:140},
+  {MedicineID:'MED-009',name:'Rhus Toxicodendron',potency:'200C',stock:7,minStock:3,category:'Dilution',price:170},
+  {MedicineID:'MED-010',name:'Calcarea Carb',potency:'200C',stock:6,minStock:3,category:'Dilution',price:180},
+  {MedicineID:'MED-011',name:'Natrum Mur',potency:'30C',stock:9,minStock:4,category:'Dilution',price:150},
+  {MedicineID:'MED-012',name:'Phosphorus',potency:'200C',stock:4,minStock:3,category:'Dilution',price:190},
+  {MedicineID:'MED-013',name:'Ignatia',potency:'200C',stock:6,minStock:3,category:'Dilution',price:160},
+  {MedicineID:'MED-014',name:'Sepia',potency:'200C',stock:5,minStock:3,category:'Dilution',price:170},
+  {MedicineID:'MED-015',name:'Thuja',potency:'1M',stock:3,minStock:2,category:'Dilution',price:210},
 ];
 
-// ==================== DETAILED SYNC ARCHITECTURE ====================
 
-function getPrimaryKey(storeKey) {
-  if(storeKey===KEYS.PATIENTS) return 'PatientID';
-  if(storeKey===KEYS.CASES) return 'CaseID';
-  if(storeKey===KEYS.COURIERS) return 'CourierID';
-  if(storeKey===KEYS.BILLING) return 'InvoiceID';
-  if(storeKey===KEYS.APPOINTMENTS) return 'AppointmentID';
-  if(storeKey===KEYS.MEDICINES) return 'MedicineID';
-  return 'id';
+// ==================== GOOGLE SHEETS SYNC ====================
+function getPrimaryKey(storeKey){
+  if(storeKey===KEYS.PATIENTS)return'PatientID';
+  if(storeKey===KEYS.CASES)return'CaseID';
+  if(storeKey===KEYS.COURIERS)return'CourierID';
+  if(storeKey===KEYS.BILLING)return'InvoiceID';
+  if(storeKey===KEYS.APPOINTMENTS)return'AppointmentID';
+  if(storeKey===KEYS.MEDICINES)return'MedicineID';
+  return'id';
 }
 
-function mergeData(localArr, remoteArr, pk) {
-  const map = new Map();
-  remoteArr.forEach(item => { if(item && item[pk]) map.set(item[pk], item); });
-  localArr.forEach(item => {
-    if(item && item[pk]) {
-      if(!map.has(item[pk])) {
-        map.set(item[pk], item);
-      } else {
-        const remoteItem = map.get(item[pk]);
-        const remoteTime = remoteItem.lastUpdated || 0;
-        const localTime = item.lastUpdated || 0;
-        if(localTime >= remoteTime) {
-          map.set(item[pk], Object.assign({}, remoteItem, item));
-        }
+function mergeData(localArr,remoteArr,pk){
+  const map=new Map();
+  remoteArr.forEach(item=>{if(item&&item[pk])map.set(item[pk],item);});
+  localArr.forEach(item=>{
+    if(item&&item[pk]){
+      if(!map.has(item[pk]))map.set(item[pk],item);
+      else{
+        const rem=map.get(item[pk]);
+        if((item.lastUpdated||0)>=(rem.lastUpdated||0))map.set(item[pk],Object.assign({},rem,item));
       }
     }
   });
   return Array.from(map.values());
 }
 
-function addToQueue(action, type, data) {
-  let queue = getAll(KEYS.OFFLINE_QUEUE);
-  queue.push({ action, type, data, timestamp: Date.now() });
-  saveAll(KEYS.OFFLINE_QUEUE, queue);
+function addToQueue(action,type,data){
+  let q=getAll(KEYS.OFFLINE_QUEUE);
+  q.push({action,type,data,timestamp:Date.now()});
+  saveAll(KEYS.OFFLINE_QUEUE,q);
 }
 
-async function processOfflineQueue() {
-  if(!navigator.onLine) return;
-  let queue = getAll(KEYS.OFFLINE_QUEUE);
-  if(queue.length === 0) return;
-  
-  for(let task of queue) {
-    let currentData = getAll(task.type);
-    let pk = getPrimaryKey(task.type);
-    if(task.action === 'SAVE' || task.action === 'EDIT') {
-      let idx = currentData.findIndex(x => x[pk] === task.data[pk]);
-      if(idx !== -1) currentData[idx] = task.data;
-      else currentData.unshift(task.data);
-    } else if(task.action === 'DELETE') {
-      currentData = currentData.filter(x => x[pk] !== task.data[pk]);
-    }
-    saveAll(task.type, currentData);
+async function processOfflineQueue(){
+  if(!navigator.onLine)return;
+  let q=getAll(KEYS.OFFLINE_QUEUE);
+  if(q.length===0)return;
+  for(let task of q){
+    let cur=getAll(task.type);
+    let pk=getPrimaryKey(task.type);
+    if(task.action==='SAVE'||task.action==='EDIT'){
+      let idx=cur.findIndex(x=>x[pk]===task.data[pk]);
+      if(idx!==-1)cur[idx]=task.data;else cur.unshift(task.data);
+    }else if(task.action==='DELETE'){cur=cur.filter(x=>x[pk]!==task.data[pk]);}
+    saveAll(task.type,cur);
   }
-  saveAll(KEYS.OFFLINE_QUEUE, []);
-  await syncToGoogleSheets();
+  saveAll(KEYS.OFFLINE_QUEUE,[]);
+  await syncToSheets();
 }
 
-async function loadFromGoogleSheets() {
-  if(!navigator.onLine) { updateSyncBadge(); return; }
-  try {
-    const res = await fetch(WEB_APP_URL + "?action=get_data");
-    const remote = await res.json();
-    if(remote) {
-      if(remote.patients) saveAll(KEYS.PATIENTS, mergeData(getAll(KEYS.PATIENTS), remote.patients, 'PatientID'));
-      if(remote.cases) saveAll(KEYS.CASES, mergeData(getAll(KEYS.CASES), remote.cases, 'CaseID'));
-      if(remote.couriers) saveAll(KEYS.COURIERS, mergeData(getAll(KEYS.COURIERS), remote.couriers, 'CourierID'));
-      if(remote.billing) saveAll(KEYS.BILLING, mergeData(getAll(KEYS.BILLING), remote.billing, 'InvoiceID'));
-      if(remote.appointments) saveAll(KEYS.APPOINTMENTS, mergeData(getAll(KEYS.APPOINTMENTS), remote.appointments, 'AppointmentID'));
-      if(remote.medicines) saveAll(KEYS.MEDICINES, mergeData(getAll(KEYS.MEDICINES), remote.medicines, 'MedicineID'));
-      
-      let syncState = ls('sync_meta') || {};
-      syncState.lastSync = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
-      ss('sync_meta', syncState);
+async function loadFromSheets(){
+  if(!navigator.onLine){updateSyncBadge();return;}
+  try{
+    const res=await fetch(WEB_APP_URL+'?action=get_data');
+    const remote=await res.json();
+    if(remote&&remote.success!==false){
+      if(remote.patients)saveAll(KEYS.PATIENTS,mergeData(getAll(KEYS.PATIENTS),remote.patients,'PatientID'));
+      if(remote.cases)saveAll(KEYS.CASES,mergeData(getAll(KEYS.CASES),remote.cases,'CaseID'));
+      if(remote.couriers)saveAll(KEYS.COURIERS,mergeData(getAll(KEYS.COURIERS),remote.couriers,'CourierID'));
+      if(remote.billing)saveAll(KEYS.BILLING,mergeData(getAll(KEYS.BILLING),remote.billing,'InvoiceID'));
+      if(remote.appointments)saveAll(KEYS.APPOINTMENTS,mergeData(getAll(KEYS.APPOINTMENTS),remote.appointments,'AppointmentID'));
+      if(remote.medicines&&remote.medicines.length>0)saveAll(KEYS.MEDICINES,mergeData(getAll(KEYS.MEDICINES),remote.medicines,'MedicineID'));
+      let sm=ls('sync_meta')||{};
+      sm.lastSync=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+      ss('sync_meta',sm);
     }
     updateSyncBadge();
-    refreshActiveViews();
-  } catch(e) {
-    console.error("Fetch cycle failure", e);
+  }catch(e){console.error('Load from sheets failed',e);updateSyncBadge();}
+}
+
+async function syncToSheets(){
+  if(!navigator.onLine){updateSyncBadge();return;}
+  try{
+    const payload={action:'sync_all',
+      patients:getAll(KEYS.PATIENTS),cases:getAll(KEYS.CASES),
+      couriers:getAll(KEYS.COURIERS),billing:getAll(KEYS.BILLING),
+      appointments:getAll(KEYS.APPOINTMENTS),medicines:getAll(KEYS.MEDICINES)};
+    await fetch(WEB_APP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
+    let sm=ls('sync_meta')||{};
+    sm.lastSync=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+    ss('sync_meta',sm);
     updateSyncBadge();
-  }
+  }catch(e){console.error('Sync to sheets failed',e);}
 }
 
-async function syncToGoogleSheets() {
-  if(!navigator.onLine) { updateSyncBadge(); return; }
-  try {
-    const payload = {
-      action: "sync_all",
-      patients: getAll(KEYS.PATIENTS),
-      cases: getAll(KEYS.CASES),
-      couriers: getAll(KEYS.COURIERS),
-      billing: getAll(KEYS.BILLING),
-      appointments: getAll(KEYS.APPOINTMENTS),
-      medicines: getAll(KEYS.MEDICINES)
-    };
-
-    const response = await fetch(WEB_APP_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload)
-    });
-    
-    if(response.ok) {
-      await loadFromGoogleSheets();
-    }
-  } catch(e) {
-    console.error("Upload process failure", e);
-    updateSyncBadge();
-  }
+async function executeCrud(storeKey,action,itemData){
+  let pk=getPrimaryKey(storeKey);
+  itemData.lastUpdated=Date.now();
+  let dataList=getAll(storeKey);
+  if(action==='SAVE'||action==='EDIT'){
+    let idx=dataList.findIndex(x=>x[pk]===itemData[pk]);
+    if(idx!==-1)dataList[idx]=itemData;else dataList.unshift(itemData);
+  }else if(action==='DELETE'){dataList=dataList.filter(x=>x[pk]!==itemData[pk]);}
+  saveAll(storeKey,dataList);
+  if(!navigator.onLine){addToQueue(action,storeKey,itemData);updateSyncBadge();}
+  else{await syncToSheets();}
 }
 
-function refreshActiveViews() {
-  if(document.getElementById('app').classList.contains('hidden')) return;
-  renderView();
-  
-  let openModal = ls(KEYS.LAST_MODAL);
-  if(openModal && openModal.active) {
-    if(openModal.type === 'detail' && openModal.id) {
-      showPatientDetail(openModal.id, true);
-    }
-  }
-}
-
-async function executeCrud(storeKey, action, itemData) {
-  let pk = getPrimaryKey(storeKey);
-  itemData.lastUpdated = Date.now();
-  let dataList = getAll(storeKey);
-
-  if(action === 'SAVE' || action === 'EDIT') {
-    let idx = dataList.findIndex(x => x[pk] === itemData[pk]);
-    if(idx !== -1) dataList[idx] = itemData;
-    else dataList.unshift(itemData);
-  } else if(action === 'DELETE') {
-    dataList = dataList.filter(x => x[pk] !== itemData[pk]);
-  }
-  
-  saveAll(storeKey, dataList);
-  refreshActiveViews();
-
-  if(!navigator.onLine) {
-    addToQueue(action, storeKey, itemData);
-    updateSyncBadge();
-  } else {
-    await syncToGoogleSheets();
-  }
-}
-
-// ==================== AUTOMATED LIFECYCLE ====================
-window.addEventListener('online', async () => { await processOfflineQueue(); });
-window.addEventListener('offline', () => { updateSyncBadge(); });
-setInterval(loadFromGoogleSheets, 30000);
+window.addEventListener('online',async()=>{await processOfflineQueue();});
+window.addEventListener('offline',()=>{updateSyncBadge();});
+setInterval(loadFromSheets,30000);
 
 // ==================== AUTH ====================
 let currentUser=null;
@@ -541,31 +496,24 @@ async function startApp(){
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   buildNav();
+  renderView();
   updateSyncBadge();
-  await loadFromGoogleSheets();
+  await loadFromSheets();
 }
 
 function updateSyncBadge(){
   const el=document.getElementById('sync-badge');
-  if(!el) return;
-  let localQueue = getAll(KEYS.OFFLINE_QUEUE);
-  
-  if(!navigator.onLine || localQueue.length > 0){
-    el.textContent='⚠️ Offline Mode (' + localQueue.length + ' Pending)';
-    el.style.display='';
-    el.style.background='var(--rose-50)';
-    el.style.color='var(--rose-700)';
-    el.style.borderColor='var(--rose-100)';
-    return;
-  }
-  
-  let syncState = ls('sync_meta') || {};
-  if(syncState.lastSync){
-    el.textContent='Synced: '+syncState.lastSync;
-    el.style.display='';
-    el.style.background='var(--emerald-50)';
-    el.style.color='var(--emerald-700)';
-    el.style.borderColor='var(--emerald-100)';
+  if(!el)return;
+  let q=getAll(KEYS.OFFLINE_QUEUE);
+  const sm=ls('sync_meta')||{};
+  if(!navigator.onLine||q.length>0){
+    el.textContent='⚠️ Offline ('+(q.length)+' pending)';
+    el.style.display='';el.style.background='var(--rose-50)';
+    el.style.color='var(--rose-700)';el.style.borderColor='var(--rose-100)';
+  } else if(sm.lastSync){
+    el.textContent='✅ Synced '+sm.lastSync;
+    el.style.display='';el.style.background='var(--emerald-50)';
+    el.style.color='var(--emerald-700)';el.style.borderColor='var(--emerald-100)';
   } else {
     el.style.display='none';
   }
@@ -591,7 +539,7 @@ function renderView(){
 function fmt(n){return'₹'+(n||0).toLocaleString('en-IN');}
 function today(){return new Date().toISOString().split('T')[0];}
 function fmtDate(d){if(!d)return'-';const dt=new Date(d);return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}
-function genId(prefix,list,pk){return`${prefix}-${(list.length+1).toString().padStart(4,'0')}`;}
+function genId(prefix,list){return`${prefix}-${(list.length+1).toString().padStart(4,'0')}`;}
 function patientInitials(name){return name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);}
 
 // ==================== DASHBOARD ====================
@@ -601,13 +549,16 @@ function renderDashboard(){
   const couriers=getAll(KEYS.COURIERS);
   const billing=getAll(KEYS.BILLING);
   const medicines=getAll(KEYS.MEDICINES);
+  const appts=getAll(KEYS.APPOINTMENTS);
 
   const todayCases=cases.filter(c=>c.date===today()).length;
   const pendingCouriers=couriers.filter(c=>c.status!=='Delivered').length;
   const pendingPayments=billing.filter(b=>b.paymentStatus==='Pending').reduce((s,b)=>s+b.total,0);
   const lowStock=medicines.filter(m=>m.stock<=m.minStock).length;
 
+  // Today's follow-ups
   const todayFollowups=cases.filter(c=>c.followUpDate===today());
+  // Missed follow-ups (overdue)
   const missedFollowups=cases.filter(c=>c.followUpDate&&c.followUpDate<today()&&c.followUpDate!==today());
 
   const cfg=ls(KEYS.SETTINGS)||{};
@@ -641,6 +592,7 @@ function renderDashboard(){
   </div>
 
   <div class="grid-2" style="margin-bottom:20px;">
+    <!-- Today Follow-ups -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="font-size:14px;font-weight:800;color:var(--slate-800);">📅 Today's Follow-ups</div>
@@ -660,6 +612,7 @@ function renderDashboard(){
       }).join('')}
     </div>
 
+    <!-- Missed Follow-ups -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
         <div style="font-size:14px;font-weight:800;color:var(--slate-800);">⚠️ Overdue Follow-ups</div>
@@ -681,6 +634,7 @@ function renderDashboard(){
     </div>
   </div>
 
+  <!-- Pending Couriers Quick View -->
   ${pendingCouriers>0?`<div class="card" style="margin-bottom:20px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
       <div style="font-size:14px;font-weight:800;color:var(--slate-800);">📦 Pending Courier Dispatch</div>
@@ -821,20 +775,15 @@ async function savePatient(){
   const year=new Date().getFullYear();
   const PatientID=`HOM-${year}-${(patients.length+1).toString().padStart(4,'0')}`;
   const p={PatientID,name,mobile,age:parseInt(age),gender,address:document.getElementById('p-address').value,occupation:document.getElementById('p-occupation').value,bloodGroup:document.getElementById('p-blood').value,createdAt:today()};
-  
   closeModal();
-  await executeCrud(KEYS.PATIENTS, 'SAVE', p);
+  await executeCrud(KEYS.PATIENTS,'SAVE',p);
+  renderPatients();
 }
 
-function showPatientDetail(pid, isSilentRefresh=false){
+function showPatientDetail(pid){
   const patients=getAll(KEYS.PATIENTS);
   const p=patients.find(pt=>pt.PatientID===pid);
-  if(!p) return;
-  
-  if(!isSilentRefresh) {
-    ss(KEYS.LAST_MODAL, { active: true, type: 'detail', id: pid });
-  }
-  
+  if(!p)return;
   const cases=getAll(KEYS.CASES).filter(c=>c.patientId===pid).sort((a,b)=>b.date.localeCompare(a.date));
   showModal(`
   <div class="modal-header">
@@ -904,7 +853,7 @@ function showEditPatient(pid){
   </div>
   <div style="display:flex;gap:10px;">
     <button class="btn btn-secondary" style="flex:1;" onclick="closeModal()">Cancel</button>
-    <button class="btn btn-primary" style="flex:1;" onclick="updatePatient('${p.PatientID}')">💾 Save</button>
+    <button class="btn btn-primary" style="flex:1;" onclick="updatePatient('${p.id}')">💾 Save</button>
   </div>`);
 }
 
@@ -912,8 +861,7 @@ async function updatePatient(pid){
   const patients=getAll(KEYS.PATIENTS);
   const idx=patients.findIndex(p=>p.PatientID===pid);
   if(idx===-1)return;
-  
-  let targetRecord = {...patients[idx],
+  const updated={...patients[idx],
     name:document.getElementById('ep-name').value,
     mobile:document.getElementById('ep-mobile').value,
     age:parseInt(document.getElementById('ep-age').value),
@@ -922,9 +870,9 @@ async function updatePatient(pid){
     occupation:document.getElementById('ep-occupation').value,
     bloodGroup:document.getElementById('ep-blood').value,
   };
-  
   closeModal();
-  await executeCrud(KEYS.PATIENTS, 'EDIT', targetRecord);
+  await executeCrud(KEYS.PATIENTS,'EDIT',updated);
+  renderPatients();
 }
 
 function showMedHistory(pid){
@@ -962,9 +910,9 @@ function showMedHistory(pid){
   </div>`);
 }
 
-async function saveMedHistory(pid){
+function saveMedHistory(pid){
+  const cases=getAll(KEYS.CASES);
   const entry={patientId:pid,date:today(),type:'history',
-    CaseID:'HIS-'+Date.now(),
     complaint:document.getElementById('mh-complaint').value,
     symptoms:document.getElementById('mh-symptoms').value,
     duration:document.getElementById('mh-duration').value,
@@ -979,9 +927,9 @@ async function saveMedHistory(pid){
     thermalNature:document.getElementById('mh-thermal').value,
     prescriptions:[],visitType:'history'
   };
-  
+  cases.unshift(entry);
+  saveAll(KEYS.CASES,cases);
   closeModal();
-  await executeCrud(KEYS.CASES, 'SAVE', entry);
   alert('Medical history saved!');
 }
 
@@ -995,6 +943,7 @@ let rxList=[];
 
 function renderConsult(){
   const patients=getAll(KEYS.PATIENTS);
+  const medicines=getAll(KEYS.MEDICINES);
   const preselected=navParam;
   rxList=[];
 
@@ -1005,6 +954,7 @@ function renderConsult(){
   </div>
 
   <div class="card">
+    <!-- Patient Select -->
     <div class="form-group">
       <label class="label">Patient *</label>
       <input class="input" id="c-search" placeholder="Search patient by name or mobile..." oninput="searchConsultPatient()" autocomplete="off"/>
@@ -1013,6 +963,7 @@ function renderConsult(){
       <div id="c-selected" class="hidden" style="margin-top:8px;padding:10px;background:var(--teal-50);border:1px solid var(--teal-100);border-radius:10px;font-size:12px;font-weight:700;color:var(--teal-700);"></div>
     </div>
 
+    <!-- Visit Type -->
     <div class="form-group">
       <label class="label">Visit Type *</label>
       <div style="display:flex;gap:10px;">
@@ -1025,6 +976,7 @@ function renderConsult(){
       </div>
     </div>
 
+    <!-- Complaint & Observations -->
     <div class="grid-2">
       <div class="form-group">
         <label class="label">Chief Complaint *</label>
@@ -1040,6 +992,7 @@ function renderConsult(){
       <textarea class="input" id="c-notes" rows="3" placeholder="Doctor's observations, symptoms detail..."></textarea>
     </div>
 
+    <!-- Prescription -->
     <div class="divider"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <div style="font-size:13px;font-weight:800;color:var(--slate-700);">💊 Prescription</div>
@@ -1050,6 +1003,7 @@ function renderConsult(){
       Search from medicine list or type custom name. Add multiple medicines.
     </div>
 
+    <!-- Follow-up & Payment -->
     <div class="divider"></div>
     <div class="grid-2">
       <div class="form-group">
@@ -1079,6 +1033,7 @@ function renderConsult(){
       </div>
     </div>
 
+    <!-- Online: Courier -->
     <div id="courier-section" class="hidden">
       <div class="divider"></div>
       <div style="font-size:13px;font-weight:800;color:var(--slate-700);margin-bottom:12px;">📦 Courier Details (Online Patient)</div>
@@ -1099,12 +1054,13 @@ function renderConsult(){
     </div>
   </div>`;
 
+  // Pre-select patient
   if(preselected){
-    const p=patients.find(pt=>pt.PatientID===preselected);
+    const p=patients.find(pt=>pt.id===preselected);
     if(p){
-      document.getElementById('c-pid').value=p.PatientID;
+      document.getElementById('c-pid').value=p.id;
       document.getElementById('c-search').value=p.name+' ('+p.mobile+')';
-      document.getElementById('c-selected').textContent='✅ '+p.name+' · '+p.PatientID;
+      document.getElementById('c-selected').textContent='✅ '+p.name+' · '+p.id;
       document.getElementById('c-selected').classList.remove('hidden');
     }
   }
@@ -1118,8 +1074,8 @@ function searchConsultPatient(){
   const box=document.getElementById('c-suggestions');
   if(!q||matches.length===0){box.innerHTML='';return;}
   box.innerHTML=`<div style="position:absolute;top:4px;left:0;right:0;background:#fff;border:1px solid var(--slate-200);border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.1);z-index:50;overflow:hidden;">
-    ${matches.map(p=>`<div style="padding:10px 14px;cursor:pointer;font-size:12px;font-weight:600;border-bottom:1px solid var(--slate-100);" onmouseover="this.style.background='var(--teal-50)'" onmouseout="this.style.background=''" onclick="selectConsultPatient('${p.PatientID}','${p.name}','${p.mobile}')">
-      <strong>${p.name}</strong> <span style="color:var(--slate-400);">${p.mobile} · ${p.PatientID}</span>
+    ${matches.map(p=>`<div style="padding:10px 14px;cursor:pointer;font-size:12px;font-weight:600;border-bottom:1px solid var(--slate-100);" onmouseover="this.style.background='var(--teal-50)'" onmouseout="this.style.background=''" onclick="selectConsultPatient('${p.id}','${p.name}','${p.mobile}')">
+      <strong>${p.name}</strong> <span style="color:var(--slate-400);">${p.mobile} · ${p.id}</span>
     </div>`).join('')}
   </div>`;
 }
@@ -1130,6 +1086,7 @@ function selectConsultPatient(id,name,mobile){
   document.getElementById('c-suggestions').innerHTML='';
   document.getElementById('c-selected').textContent='✅ '+name+' · '+id;
   document.getElementById('c-selected').classList.remove('hidden');
+  // Auto fill ship address
   const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===id);
   if(p&&p.address)document.getElementById('c-shipaddr')&&(document.getElementById('c-shipaddr').value=p.address);
 }
@@ -1194,7 +1151,7 @@ function collectRx(){
   return rxs;
 }
 
-async function saveConsult(){
+function saveConsult(){
   const pid=document.getElementById('c-pid').value;
   const complaint=document.getElementById('c-complaint').value.trim();
   const err=document.getElementById('c-err');
@@ -1209,48 +1166,48 @@ async function saveConsult(){
   const CaseID='REC-'+Date.now();
 
   const consult={
-    CaseID,patientId:pid,date:today(),visitType,
+    id:caseId,patientId:pid,date:today(),visitType,
     complaint,duration:document.getElementById('c-duration').value,
     notes:document.getElementById('c-notes').value,
     prescriptions,
     followUpDate:document.getElementById('c-followup').value||'',
     payStatus,fee,medCharge,courierCharge,
   };
-  
-  await executeCrud(KEYS.CASES, 'SAVE', consult);
+  const cases=getAll(KEYS.CASES);
+  cases.unshift(consult);
+  saveAll(KEYS.CASES,cases);
 
+  // Billing entry
   const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===pid);
   const total=fee+medCharge+courierCharge;
   if(total>0){
     const bills=getAll(KEYS.BILLING);
     const year=new Date().getFullYear();
-    const InvoiceID=`INV-${year}-${(bills.length+1).toString().padStart(4,'0')}`;
-    
-    const targetBill = {
-      InvoiceID,
+    bills.unshift({
+      id:`INV-${year}-${(bills.length+1).toString().padStart(4,'0')}`,
       patientId:pid,patientName:p?.name||'',date:today(),
       consultFee:fee,medCharge,courierCharge,total,
       payMode:document.getElementById('c-paymode').value,
       paymentStatus:payStatus
-    };
-    await executeCrud(KEYS.BILLING, 'SAVE', targetBill);
+    });
+    saveAll(KEYS.BILLING,bills);
   }
 
+  // Courier entry for online
   if(visitType==='online'&&prescriptions.length>0){
     const couriers=getAll(KEYS.COURIERS);
-    const CourierID='COU-'+(couriers.length+1).toString().padStart(3,'0');
-    
-    const targetCourier = {
-      CourierID,
+    couriers.unshift({
+      id:'COU-'+(couriers.length+1).toString().padStart(3,'0'),
       patientId:pid,patientName:p?.name||'',mobile:p?.mobile||'',
       address:document.getElementById('c-shipaddr').value,
       caseId:CaseID,status:'Prescription Ready',
       dispatchDate:'',deliveryDate:'',carrier:'',tracking:'',notes:'',
       createdAt:today()
-    };
-    await executeCrud(KEYS.COURIERS, 'SAVE', targetCourier);
+    });
+    saveAll(KEYS.COURIERS,couriers);
   }
 
+  syncToSheets();
   navParam=null;
   navigate('patients');
   setTimeout(()=>alert('✅ Consultation saved successfully!'),100);
@@ -1322,6 +1279,7 @@ function renderCourierList(couriers){
         <span class="badge ${isDone?'badge-emerald':sIdx>=3?'badge-indigo':'badge-amber'}">${c.status}</span>
       </div>
 
+      <!-- Pipeline Steps -->
       <div class="pipeline-steps" style="margin-bottom:12px;">
         ${COURIER_PIPELINE.map((s,i)=>`
           <div class="pipeline-step">
@@ -1345,18 +1303,17 @@ function renderCourierList(couriers){
   }).join('');
 }
 
-async function progressCourier(id){
+function progressCourier(id){
   const couriers=getAll(KEYS.COURIERS);
   const idx=couriers.findIndex(c=>c.CourierID===id);
   if(idx===-1)return;
   const sIdx=COURIER_PIPELINE.indexOf(couriers[idx].status);
   if(sIdx<COURIER_PIPELINE.length-1){
-    let updated = {...couriers[idx]};
-    updated.status=COURIER_PIPELINE[sIdx+1];
-    if(updated.status==='Courier Dispatched') updated.dispatchDate=today();
-    if(updated.status==='Delivered') updated.deliveryDate=today();
-    
-    await executeCrud(KEYS.COURIERS, 'EDIT', updated);
+    couriers[idx].status=COURIER_PIPELINE[sIdx+1];
+    if(couriers[idx].status==='Courier Dispatched')couriers[idx].dispatchDate=today();
+    if(couriers[idx].status==='Delivered')couriers[idx].deliveryDate=today();
+    saveAll(KEYS.COURIERS,couriers);
+    syncToSheets();
     renderCourier();
   }
 }
@@ -1369,7 +1326,7 @@ function showCourierEdit(id){
     <div class="modal-title">✏️ Update Courier Info</div>
     <button class="close-btn" onclick="closeModal()">✕</button>
   </div>
-  <div style="font-size:13px;font-weight:700;color:var(--teal-700);margin-bottom:14px;">${c.patientName} · ${c.CourierID}</div>
+  <div style="font-size:13px;font-weight:700;color:var(--teal-700);margin-bottom:14px;">${c.patientName} · ${c.id}</div>
   <div class="form-group"><label class="label">Courier Company</label>
     <input class="input" id="ce-carrier" value="${c.carrier||''}" placeholder="e.g. Professional Couriers, Delhivery"/>
   </div>
@@ -1385,19 +1342,16 @@ function showCourierEdit(id){
   </div>`);
 }
 
-async function saveCourierEdit(id){
+function saveCourierEdit(id){
   const couriers=getAll(KEYS.COURIERS);
   const idx=couriers.findIndex(c=>c.CourierID===id);
   if(idx===-1)return;
-  
-  let updated = {...couriers[idx],
-    carrier: document.getElementById('ce-carrier').value,
-    tracking: document.getElementById('ce-tracking').value,
-    notes: document.getElementById('ce-notes').value
-  };
-  
+  couriers[idx].carrier=document.getElementById('ce-carrier').value;
+  couriers[idx].tracking=document.getElementById('ce-tracking').value;
+  couriers[idx].notes=document.getElementById('ce-notes').value;
+  saveAll(KEYS.COURIERS,couriers);
+  syncToSheets();
   closeModal();
-  await executeCrud(KEYS.COURIERS, 'EDIT', updated);
   renderCourier();
 }
 
@@ -1491,9 +1445,8 @@ async function markPaid(id){
   const bills=getAll(KEYS.BILLING);
   const idx=bills.findIndex(b=>b.InvoiceID===id);
   if(idx!==-1){
-    let updated = {...bills[idx]};
-    updated.paymentStatus='Paid';
-    await executeCrud(KEYS.BILLING, 'EDIT', updated);
+    const updated={...bills[idx],paymentStatus:'Paid'};
+    await executeCrud(KEYS.BILLING,'EDIT',updated);
     renderBilling();
   }
 }
@@ -1585,8 +1538,7 @@ async function saveMedicine(){
   const name=document.getElementById('am-name').value.trim();
   if(!name)return alert('Medicine name required!');
   const meds=getAll(KEYS.MEDICINES);
-  
-  const targetMed = {
+  const med={
     MedicineID:`MED-${(meds.length+1).toString().padStart(3,'0')}`,
     name,potency:document.getElementById('am-potency').value,
     category:document.getElementById('am-cat').value,
@@ -1594,9 +1546,8 @@ async function saveMedicine(){
     minStock:parseInt(document.getElementById('am-min').value)||5,
     price:parseFloat(document.getElementById('am-price').value)||0,
   };
-  
   closeModal();
-  await executeCrud(KEYS.MEDICINES, 'SAVE', targetMed);
+  await executeCrud(KEYS.MEDICINES,'SAVE',med);
   renderInventory();
 }
 
@@ -1625,17 +1576,9 @@ async function updateMed(id){
   const meds=getAll(KEYS.MEDICINES);
   const idx=meds.findIndex(m=>m.MedicineID===id);
   if(idx===-1)return;
-  
-  let updated = {...meds[idx],
-    name:document.getElementById('em-name').value,
-    potency:document.getElementById('em-potency').value,
-    stock:parseInt(document.getElementById('em-stock').value)||0,
-    minStock:parseInt(document.getElementById('em-min').value)||5,
-    price:parseFloat(document.getElementById('em-price').value)||0
-  };
-  
+  const updated={...meds[idx],name:document.getElementById('em-name').value,potency:document.getElementById('em-potency').value,stock:parseInt(document.getElementById('em-stock').value)||0,minStock:parseInt(document.getElementById('em-min').value)||5,price:parseFloat(document.getElementById('em-price').value)||0};
   closeModal();
-  await executeCrud(KEYS.MEDICINES, 'EDIT', updated);
+  await executeCrud(KEYS.MEDICINES,'EDIT',updated);
   renderInventory();
 }
 
@@ -1699,7 +1642,7 @@ function showAddAppointment(){
   </div>
   <div class="form-group"><label class="label">Patient Name *</label>
     <input class="input" id="na-pname" placeholder="Patient name" list="na-plist"/>
-    <datalist id="na-plist">${patients.map(p=>`<option value="${p.name} (${p.mobile})" data-pid="${p.PatientID}">`).join('')}</datalist>
+    <datalist id="na-plist">${patients.map(p=>`<option value="${p.name} (${p.mobile})" data-pid="${p.id}">`).join('')}</datalist>
     <input type="hidden" id="na-pid"/>
   </div>
   <div class="form-group"><label class="label">Mobile</label><input class="input" id="na-mobile" placeholder="Mobile number"/></div>
@@ -1723,8 +1666,7 @@ async function saveAppt(){
   const pname=document.getElementById('na-pname').value.trim();
   const date=document.getElementById('na-date').value;
   if(!pname||!date)return alert('Name and date required!');
-  
-  const targetAppt = {
+  const appt={
     AppointmentID:'APP-'+Date.now(),
     patientName:pname.split('(')[0].trim(),
     mobile:document.getElementById('na-mobile').value,
@@ -1733,9 +1675,8 @@ async function saveAppt(){
     status:'Scheduled',
     notes:document.getElementById('na-notes').value
   };
-  
   closeModal();
-  await executeCrud(KEYS.APPOINTMENTS, 'SAVE', targetAppt);
+  await executeCrud(KEYS.APPOINTMENTS,'SAVE',appt);
   renderAppointments();
 }
 
@@ -1743,9 +1684,8 @@ async function updateApptStatus(id,status){
   const appts=getAll(KEYS.APPOINTMENTS);
   const idx=appts.findIndex(a=>a.AppointmentID===id);
   if(idx!==-1){
-    let updated = {...appts[idx]};
-    updated.status=status;
-    await executeCrud(KEYS.APPOINTMENTS, 'EDIT', updated);
+    const updated={...appts[idx],status};
+    await executeCrud(KEYS.APPOINTMENTS,'EDIT',updated);
     renderAppointments();
   }
 }
@@ -1753,6 +1693,7 @@ async function updateApptStatus(id,status){
 // ==================== SETTINGS ====================
 function renderSettings(){
   const cfg=ls(KEYS.SETTINGS)||{};
+  const sync=ls(KEYS.SYNC)||{};
   document.getElementById('content').innerHTML=`
   <div style="margin-bottom:20px;">
     <div class="section-title">⚙️ Settings</div>
@@ -1776,12 +1717,12 @@ function renderSettings(){
 
   <div class="card">
     <div style="font-size:14px;font-weight:800;color:var(--slate-700);margin-bottom:8px;">📊 Google Sheets Sync</div>
-    <div style="font-size:12px;color:var(--slate-500);margin-bottom:16px;">Cross-device production-ready strict architecture. Datasets matched precisely by schema definitions.</div>
-    <div class="form-group"><label class="label">Apps Script Web App URL</label>
-      <input class="input" id="cfg-syncurl" value="${WEB_APP_URL}" disabled style="background:var(--slate-100);color:var(--slate-500);font-family:monospace;font-size:11px;"/>
+    <div style="font-size:12px;color:var(--slate-500);margin-bottom:16px;">Auto-sync enabled. Data saves locally and syncs to Google Sheets automatically.</div>
+    <div class="form-group"><label class="label">Apps Script URL</label>
+      <input class="input" value="${WEB_APP_URL}" disabled style="background:var(--slate-100);color:var(--slate-500);font-family:monospace;font-size:10px;"/>
     </div>
-    <div style="display:flex;gap:10px;margin-top:16px;">
-      <button class="btn btn-primary" onclick="manualSync()">🔄 Sync Now</button>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-primary" onclick="manualSyncNow()">🔄 Sync Now</button>
     </div>
   </div>
   `;
@@ -1797,30 +1738,39 @@ async function saveSettings(){
   };
   ss(KEYS.SETTINGS,cfg);
   document.getElementById('sb-clinic-name').textContent=cfg.clinicName||'Clinic';
-  
-  if(!navigator.onLine) {
-    updateSyncBadge();
-  } else {
-    await syncToGoogleSheets();
-  }
   alert('✅ Settings saved! New PINs active from next login.');
 }
 
-// ==================== MODAL LAYER ====================
+function saveSyncConfig_unused(){
+  const sync={url:document.getElementById('cfg-syncurl').value,enabled:document.getElementById('cfg-sync-enabled').checked};
+  ss(KEYS.SYNC,sync);
+  updateSyncBadge();
+  alert('✅ Sync config saved!');
+}
+
+async function manualSyncNow(){
+  if(!navigator.onLine){alert('⚠️ No internet connection!');return;}
+  try{
+    await syncToSheets();
+    await loadFromSheets();
+    alert('✅ Sync completed!');
+    renderSettings();
+  }catch(e){alert('⚠️ Sync failed: '+e.message);}
+}
+
+// ==================== MODAL ====================
 function showModal(html, extraClass=''){
   document.getElementById('modal-container').innerHTML=`
   <div class="modal-overlay" onclick="closeModalOverlay(event)">
     <div class="modal ${extraClass} fade-in">${html}</div>
   </div>`;
 }
-function closeModal(){
-  document.getElementById('modal-container').innerHTML='';
-  ss(KEYS.LAST_MODAL, { active: false, type: '', id: null });
-}
+function closeModal(){document.getElementById('modal-container').innerHTML='';}
 function closeModalOverlay(e){if(e.target.classList.contains('modal-overlay'))closeModal();}
 
 // ==================== INIT ====================
 initDB();
+// Auto-login if session exists
 const savedUser=ls(KEYS.USER);
 if(savedUser){
   currentUser=savedUser;
