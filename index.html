@@ -328,9 +328,15 @@ function mergeLists(localList, remoteList) {
   return Array.from(mergedMap.values());
 }
 
+function getSyncUrl() {
+  const sync = ls(KEYS.SYNC);
+  return (sync && sync.url) || WEB_APP_URL;
+}
+
 async function loadFromGoogleSheets() {
   try {
-    const res = await fetch(WEB_APP_URL + "?action=get_data", {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl + "?action=get_data", {
       method: "GET",
       headers: { "Accept": "application/json" }
     });
@@ -393,6 +399,16 @@ async function loadFromGoogleSheets() {
             payStatus: c.PayStatus || c.payStatus || '',
             payMode: c.PayMode || c.payMode || '',
             prescriptions: rxs.length > 0 ? rxs : (c.prescriptions || []),
+            visitDate: c.VisitDate || c.visitDate || c.Date || c.date || '',
+            visitTime: c.VisitTime || c.visitTime || '',
+            chiefComplaint: c.ChiefComplaint || c.chiefComplaint || c.Complaint || c.complaint || '',
+            symptoms: c.Symptoms || c.symptoms || '',
+            diagnosis: c.Diagnosis || c.diagnosis || '',
+            clinicalNotes: c.ClinicalNotes || c.clinicalNotes || c.Notes || c.notes || '',
+            prescriptionSummary: c.PrescriptionSummary || c.prescriptionSummary || '',
+            followUpDays: parseInt(c.FollowUpDays || c.followUpDays) || 0,
+            doctorName: c.DoctorName || c.doctorName || '',
+            createdAt: c.CreatedAt || c.createdAt || '',
             updatedAt: c.updatedAt || Date.now()
           };
         });
@@ -477,7 +493,7 @@ async function loadFromGoogleSheets() {
       updateSyncBadge();
     }
   } catch (err) {
-    console.error("Offline or error loading from Google Sheets:", err);
+    console.warn("Offline or error loading from Google Sheets:", err);
     isOffline = true;
     document.getElementById('offline-badge').classList.remove('hidden');
   }
@@ -500,10 +516,11 @@ async function loadFromGoogleSheets() {
 
 async function syncToGoogleSheets() {
   try {
+    const activeUrl = getSyncUrl();
     // 1. Download latest data to avoid overwriting stale data (Download -> Merge -> Upload -> Reload)
     let remoteData = null;
     try {
-      const res = await fetch(WEB_APP_URL + "?action=get_data", {
+      const res = await fetch(activeUrl + "?action=get_data", {
         method: "GET",
         headers: { "Accept": "application/json" }
       });
@@ -561,6 +578,16 @@ async function syncToGoogleSheets() {
           payStatus: c.PayStatus || c.payStatus || '',
           payMode: c.PayMode || c.payMode || '',
           prescriptions: rxs.length > 0 ? rxs : (c.prescriptions || []),
+          visitDate: c.VisitDate || c.visitDate || c.Date || c.date || '',
+          visitTime: c.VisitTime || c.visitTime || '',
+          chiefComplaint: c.ChiefComplaint || c.chiefComplaint || c.Complaint || c.complaint || '',
+          symptoms: c.Symptoms || c.symptoms || '',
+          diagnosis: c.Diagnosis || c.diagnosis || '',
+          clinicalNotes: c.ClinicalNotes || c.clinicalNotes || c.Notes || c.notes || '',
+          prescriptionSummary: c.PrescriptionSummary || c.prescriptionSummary || '',
+          followUpDays: parseInt(c.FollowUpDays || c.followUpDays) || 0,
+          doctorName: c.DoctorName || c.doctorName || '',
+          createdAt: c.CreatedAt || c.createdAt || '',
           updatedAt: c.updatedAt || Date.now()
         };
       });
@@ -645,7 +672,7 @@ async function syncToGoogleSheets() {
     };
 
     // 3. Upload merged data
-    await fetch(WEB_APP_URL, {
+    await fetch(activeUrl, {
       method: 'POST',
       mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
@@ -658,7 +685,7 @@ async function syncToGoogleSheets() {
     // 4. Reload latest from sheets
     await loadFromGoogleSheets();
   } catch (err) {
-    console.error("Synchronization failed:", err);
+    console.warn("Synchronization failed:", err);
     isOffline = true;
     document.getElementById('offline-badge').classList.remove('hidden');
   }
@@ -1242,6 +1269,238 @@ function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
+function calculateFollowUpDate() {
+  const visitDateEl = document.getElementById('c-visit-date');
+  const daysEl = document.getElementById('c-followup-days');
+  const displayEl = document.getElementById('c-followup-date-display');
+  const hiddenEl = document.getElementById('c-followup-date');
+  
+  if (!visitDateEl || !daysEl || !displayEl || !hiddenEl) return;
+  
+  const visitDateStr = visitDateEl.value;
+  let daysVal = daysEl.value.trim();
+  
+  if (!visitDateStr || !daysVal) {
+    displayEl.value = '';
+    hiddenEl.value = '';
+    saveConsultDraft();
+    return;
+  }
+  
+  // Validation: positive integer only, maximum 365
+  daysVal = daysVal.replace(/[^\d]/g, '');
+  let days = parseInt(daysVal, 10);
+  if (isNaN(days) || days <= 0) {
+    daysEl.value = '';
+    displayEl.value = '';
+    hiddenEl.value = '';
+    saveConsultDraft();
+    return;
+  }
+  
+  if (days > 365) {
+    days = 365;
+    daysEl.value = 365;
+  } else {
+    daysEl.value = days;
+  }
+  
+  const dateObj = new Date(visitDateStr);
+  if (isNaN(dateObj.getTime())) {
+    displayEl.value = 'Invalid Visit Date';
+    hiddenEl.value = '';
+    saveConsultDraft();
+    return;
+  }
+  
+  dateObj.setDate(dateObj.getDate() + days);
+  
+  const followUpDateStr = dateObj.toISOString().split('T')[0];
+  hiddenEl.value = followUpDateStr;
+  displayEl.value = fmtDate(followUpDateStr);
+  
+  saveConsultDraft();
+}
+
+function viewPastConsultation(caseId) {
+  const cases = getAll(KEYS.CASES);
+  const c = cases.find(item => item.id === caseId);
+  if (!c) {
+    alert("Consultation not found!");
+    return;
+  }
+  
+  const patients = getAll(KEYS.PATIENTS);
+  const p = patients.find(pt => pt.id === c.patientId) || {};
+  
+  const rxs = c.prescriptions || [];
+  const rxHtml = rxs.length === 0 
+    ? `<div style="font-size:12px;color:var(--slate-400);font-style:italic;">No medicines prescribed</div>`
+    : `<table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:8px;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--slate-200);text-align:left;color:var(--slate-50);background:var(--slate-700);font-weight:700;">
+            <th style="padding:6px 8px;border-top-left-radius:6px;border-bottom-left-radius:6px;">Medicine</th>
+            <th style="padding:6px 8px;">Potency</th>
+            <th style="padding:6px 8px;">Dosage</th>
+            <th style="padding:6px 8px;border-top-right-radius:6px;border-bottom-right-radius:6px;">Duration</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rxs.map(rx => `
+            <tr style="border-bottom:1px solid var(--slate-100);">
+              <td style="padding:8px;font-weight:600;color:var(--slate-800);">${escapeHtml(rx.name)}</td>
+              <td style="padding:8px;color:var(--slate-600);">${escapeHtml(rx.potency)}</td>
+              <td style="padding:8px;color:var(--slate-600);">${escapeHtml(rx.dosage)}</td>
+              <td style="padding:8px;color:var(--slate-600);">${escapeHtml(rx.duration)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`;
+
+  const visitDateDisplay = fmtDate(c.visitDate || c.date);
+  const followUpDateDisplay = c.followUpDate ? fmtDate(c.followUpDate) : '-';
+  const followUpDaysDisplay = c.followUpDays ? `${c.followUpDays} Days` : '-';
+
+  const modalContent = `
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">📄 Consultation Details</div>
+        <div style="font-size:11px;color:var(--slate-400);font-family:monospace;margin-top:2px;">Case ID: ${c.id}</div>
+      </div>
+      <button class="close-btn" onclick="closeModal()">✕</button>
+    </div>
+
+    <!-- Patient Header Summary -->
+    <div style="display:flex;align-items:center;gap:12px;background:var(--slate-50);padding:12px;border-radius:12px;border:1px solid var(--slate-100);margin-bottom:16px;">
+      <div class="patient-avatar" style="width:40px;height:40px;font-size:14px;background:var(--teal-100);color:var(--teal-700);">${patientInitials(p.name || 'Unknown')}</div>
+      <div>
+        <div style="font-weight:700;color:var(--slate-800);">${p.name || 'Unknown Patient'}</div>
+        <div style="font-size:11px;color:var(--slate-500);">${p.id || c.patientId} · ${p.age || ''}y · ${p.gender || ''} · ${p.mobile || ''}</div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:12px;">
+      <div class="card-sm"><div class="label">Visit Date</div><div style="font-weight:700;">${visitDateDisplay}</div></div>
+      <div class="card-sm"><div class="label">Visit Time</div><div style="font-weight:700;">${c.visitTime || '-'}</div></div>
+      <div class="card-sm"><div class="label">Visit Type</div><div style="font-weight:700;text-transform:capitalize;">${c.visitType || 'Walk-in'}</div></div>
+      <div class="card-sm"><div class="label">Doctor Name</div><div style="font-weight:700;">${c.doctorName || 'Dr. Self'}</div></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div style="margin-bottom:12px;">
+      <div class="label" style="font-weight:700;margin-bottom:4px;color:var(--slate-700);">Chief Complaint</div>
+      <div style="font-size:13px;color:var(--slate-800);background:var(--slate-50);padding:8px 12px;border-radius:8px;">${escapeHtml(c.complaint || c.chiefComplaint || '-')} ${c.duration ? `(${escapeHtml(c.duration)})` : ''}</div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:12px;">
+      <div>
+        <div class="label" style="font-weight:700;margin-bottom:4px;color:var(--slate-700);">Symptoms</div>
+        <div style="font-size:13px;color:var(--slate-800);background:var(--slate-50);padding:8px 12px;border-radius:8px;min-height:36px;">${escapeHtml(c.symptoms || '-')}</div>
+      </div>
+      <div>
+        <div class="label" style="font-weight:700;margin-bottom:4px;color:var(--slate-700);">Diagnosis</div>
+        <div style="font-size:13px;color:var(--slate-800);background:var(--slate-50);padding:8px 12px;border-radius:8px;min-height:36px;">${escapeHtml(c.diagnosis || '-')}</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px;">
+      <div class="label" style="font-weight:700;margin-bottom:4px;color:var(--slate-700);">Observations / Clinical Notes</div>
+      <div style="font-size:13px;color:var(--slate-800);background:var(--slate-50);padding:8px 12px;border-radius:8px;white-space:pre-wrap;min-height:48px;">${escapeHtml(c.notes || c.clinicalNotes || '-')}</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:800;color:var(--slate-700);margin-bottom:6px;">💊 Prescribed Medicines</div>
+      ${rxHtml}
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="grid-2" style="margin-bottom:16px;">
+      <div class="card-sm"><div class="label">Follow-up Period</div><div style="font-weight:700;color:var(--teal-600);">${followUpDaysDisplay}</div></div>
+      <div class="card-sm"><div class="label">Next Visit Date</div><div style="font-weight:700;color:var(--teal-600);">${followUpDateDisplay}</div></div>
+    </div>
+
+    <div class="grid-3" style="margin-bottom:16px;">
+      <div class="card-sm"><div class="label">Consult Fee</div><div style="font-weight:700;">₹${c.fee || 0}</div></div>
+      <div class="card-sm"><div class="label">Medicine Charges</div><div style="font-weight:700;">₹${c.medCharge || 0}</div></div>
+      ${c.visitType==='online' ? `<div class="card-sm"><div class="label">Courier Charges</div><div style="font-weight:700;">₹${c.courierCharge || 0}</div></div>` : ''}
+    </div>
+
+    <div class="grid-2" style="margin-bottom:16px;">
+      <div class="card-sm"><div class="label">Payment Mode</div><div style="font-weight:700;">${c.payMode || 'Cash'}</div></div>
+      <div class="card-sm">
+        <div class="label">Payment Status</div>
+        <span class="badge ${c.payStatus==='Paid'?'badge-teal':'badge-orange'}">${c.payStatus || 'Paid'}</span>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;">
+      <button class="btn btn-primary" onclick="closeModal()" style="width:120px;">Close</button>
+    </div>
+  `;
+
+  showModal(modalContent, 'modal-lg');
+}
+
+function renderPreviousCaseHistory(pid) {
+  const container = document.getElementById('c-history-section');
+  const listEl = document.getElementById('c-history-list');
+  if (!container || !listEl) return;
+
+  if (!pid) {
+    container.classList.add('hidden');
+    listEl.innerHTML = '';
+    return;
+  }
+
+  const cases = getAll(KEYS.CASES)
+    .filter(c => c.patientId === pid)
+    .sort((a, b) => {
+      const tA = a.updatedAt || new Date(a.visitDate || a.date).getTime() || 0;
+      const tB = b.updatedAt || new Date(b.visitDate || b.date).getTime() || 0;
+      return tB - tA;
+    });
+
+  if (cases.length === 0) {
+    container.classList.remove('hidden');
+    listEl.innerHTML = `
+      <div class="empty-state" style="padding:20px; border: 1px dashed var(--slate-200); border-radius:10px; background:var(--slate-50);">
+        <div class="empty-icon">📋</div>
+        <div class="empty-sub" style="font-size:12px;color:var(--slate-400);">No previous consultations recorded for this patient.</div>
+      </div>`;
+    return;
+  }
+
+  container.classList.remove('hidden');
+  listEl.innerHTML = cases.map(c => {
+    const medicinesList = (c.prescriptions || []).map(rx => `<span class="rx-chip" style="display:inline-block;background:var(--slate-100);color:var(--slate-700);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;margin-right:4px;margin-bottom:4px;">💊 ${escapeHtml(rx.name)} ${escapeHtml(rx.potency)}</span>`).join('');
+    const visitDateStr = fmtDate(c.visitDate || c.date);
+    const nextVisitStr = c.followUpDate ? fmtDate(c.followUpDate) : '-';
+    const followUpDaysStr = c.followUpDays ? `${c.followUpDays} Days` : '-';
+
+    return `
+      <div class="history-item" onclick="viewPastConsultation('${c.id}')" style="cursor:pointer;padding:12px;border:1px solid var(--slate-100);border-radius:10px;margin-bottom:10px;background:#fff;transition:all 0.2s;" onmouseover="this.style.borderColor='var(--teal-200)';this.style.background='var(--teal-50)'" onmouseout="this.style.borderColor='var(--slate-100)';this.style.background='#fff'">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <div style="font-weight:700;font-size:13px;color:var(--slate-800);">${visitDateStr}</div>
+          <span class="badge ${c.visitType==='walkin'?'badge-teal':'badge-indigo'}" style="font-size:10px;padding:2px 6px;">${c.visitType==='walkin'?'Walk-in':'Online'}</span>
+        </div>
+        <div style="font-size:12px;color:var(--slate-600);margin-bottom:6px;">
+          <strong>Complaint:</strong> ${escapeHtml(c.complaint || c.chiefComplaint || '-')}
+          ${c.diagnosis ? ` · <strong>Diagnosis:</strong> ${escapeHtml(c.diagnosis)}` : ''}
+        </div>
+        ${medicinesList ? `<div style="margin-bottom:6px;">${medicinesList}</div>` : ''}
+        <div style="display:flex;gap:16px;font-size:11px;color:var(--slate-400);font-weight:600;">
+          <span>📅 Follow-up: <strong style="color:var(--teal-600);">${followUpDaysStr}</strong></span>
+          <span>Next Visit: <strong style="color:var(--teal-600);">${nextVisitStr}</strong></span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
 function saveConsultDraft() {
   if (activeTab !== 'consult') return;
   const draft = {
@@ -1250,10 +1509,15 @@ function saveConsultDraft() {
     selectedText: document.getElementById('c-selected')?.textContent || '',
     selectedHidden: document.getElementById('c-selected')?.classList.contains('hidden') ?? true,
     visitType: document.querySelector('input[name="vtype"]:checked')?.value || 'walkin',
+    visitDate: document.getElementById('c-visit-date')?.value || today(),
+    visitTime: document.getElementById('c-visit-time')?.value || '',
     complaint: document.getElementById('c-complaint')?.value || '',
     duration: document.getElementById('c-duration')?.value || '',
+    symptoms: document.getElementById('c-symptoms')?.value || '',
+    diagnosis: document.getElementById('c-diagnosis')?.value || '',
     notes: document.getElementById('c-notes')?.value || '',
-    followup: document.getElementById('c-followup')?.value || '',
+    followupDays: document.getElementById('c-followup-days')?.value || '',
+    followupDate: document.getElementById('c-followup-date')?.value || '',
     fee: document.getElementById('c-fee')?.value || '',
     medcharge: document.getElementById('c-medcharge')?.value || '',
     paymode: document.getElementById('c-paymode')?.value || 'Cash',
@@ -1306,6 +1570,18 @@ function renderConsult(){
       <div id="c-selected" class="hidden" style="margin-top:8px;padding:10px;background:var(--teal-50);border:1px solid var(--teal-100);border-radius:10px;font-size:12px;font-weight:700;color:var(--teal-700);"></div>
     </div>
 
+    <!-- Date & Time of Visit -->
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="label">Visit Date *</label>
+        <input class="input" type="date" id="c-visit-date" onchange="calculateFollowUpDate()"/>
+      </div>
+      <div class="form-group">
+        <label class="label">Visit Time</label>
+        <input class="input" type="time" id="c-visit-time" oninput="saveConsultDraft()"/>
+      </div>
+    </div>
+
     <!-- Visit Type -->
     <div class="form-group">
       <label class="label">Visit Type *</label>
@@ -1329,9 +1605,17 @@ function renderConsult(){
         <label class="label">Duration</label>
         <input class="input" id="c-duration" placeholder="e.g. 3 days, 2 weeks"/>
       </div>
+      <div class="form-group">
+        <label class="label">Symptoms</label>
+        <input class="input" id="c-symptoms" placeholder="e.g. Cough, fever, headache"/>
+      </div>
+      <div class="form-group">
+        <label class="label">Diagnosis</label>
+        <input class="input" id="c-diagnosis" placeholder="e.g. Acute bronchitis"/>
+      </div>
     </div>
     <div class="form-group">
-      <label class="label">Observations / Notes</label>
+      <label class="label">Observations / Clinical Notes</label>
       <textarea class="input" id="c-notes" rows="3" placeholder="Doctor's observations, symptoms detail..."></textarea>
     </div>
 
@@ -1350,8 +1634,13 @@ function renderConsult(){
     <div class="divider"></div>
     <div class="grid-2">
       <div class="form-group">
-        <label class="label">Follow-up Date</label>
-        <input class="input" type="date" id="c-followup"/>
+        <label class="label">Follow-up Days</label>
+        <input class="input" type="number" id="c-followup-days" min="1" max="365" step="1" placeholder="Positive integer only (max 365)" oninput="calculateFollowUpDate()"/>
+      </div>
+      <div class="form-group">
+        <label class="label">Calculated Follow-up Date</label>
+        <input class="input" type="text" id="c-followup-date-display" readonly style="background:var(--slate-50);cursor:not-allowed;" placeholder="No follow-up date"/>
+        <input type="hidden" id="c-followup-date"/>
       </div>
       <div class="form-group">
         <label class="label">Consultation Fee (₹)</label>
@@ -1396,6 +1685,12 @@ function renderConsult(){
       <button class="btn btn-danger" style="flex:1;" onclick="clearConsultForm()">Reset</button>
       <button class="btn btn-primary" style="flex:2;" onclick="saveConsult()">💾 Save Consultation</button>
     </div>
+  </div>
+
+  <!-- Previous Case History Section -->
+  <div id="c-history-section" class="card hidden" style="margin-top:20px;">
+    <div style="font-size:15px;font-weight:800;color:var(--slate-700);margin-bottom:12px;">📋 Previous Case History (Multiple Visits)</div>
+    <div id="c-history-list"></div>
   </div>`;
 
   // Restore logic
@@ -1405,10 +1700,15 @@ function renderConsult(){
   } catch(e) {}
 
   if(draft){
+    if(document.getElementById('c-visit-date')) document.getElementById('c-visit-date').value=draft.visitDate||today();
+    if(document.getElementById('c-visit-time')) document.getElementById('c-visit-time').value=draft.visitTime||'';
     if(document.getElementById('c-complaint')) document.getElementById('c-complaint').value=draft.complaint||'';
     if(document.getElementById('c-duration')) document.getElementById('c-duration').value=draft.duration||'';
+    if(document.getElementById('c-symptoms')) document.getElementById('c-symptoms').value=draft.symptoms||'';
+    if(document.getElementById('c-diagnosis')) document.getElementById('c-diagnosis').value=draft.diagnosis||'';
     if(document.getElementById('c-notes')) document.getElementById('c-notes').value=draft.notes||'';
-    if(document.getElementById('c-followup')) document.getElementById('c-followup').value=draft.followup||'';
+    if(document.getElementById('c-followup-days')) document.getElementById('c-followup-days').value=draft.followupDays||'';
+    if(document.getElementById('c-followup-date')) document.getElementById('c-followup-date').value=draft.followupDate||'';
     if(document.getElementById('c-fee')) document.getElementById('c-fee').value=draft.fee||'';
     if(document.getElementById('c-medcharge')) document.getElementById('c-medcharge').value=draft.medcharge||'';
     if(document.getElementById('c-paymode')) document.getElementById('c-paymode').value=draft.paymode||'Cash';
@@ -1459,7 +1759,14 @@ function renderConsult(){
     } else {
       addRxRow();
     }
+    
+    calculateFollowUpDate();
+    renderPreviousCaseHistory(finalPid);
   } else {
+    // No draft: Set default Date and Time
+    if(document.getElementById('c-visit-date')) document.getElementById('c-visit-date').value=today();
+    if(document.getElementById('c-visit-time')) document.getElementById('c-visit-time').value=new Date().toTimeString().slice(0,5);
+
     if(preselected){
       const p=patients.find(pt=>pt.id===preselected);
       if(p){
@@ -1470,6 +1777,7 @@ function renderConsult(){
         if(p.address && document.getElementById('c-shipaddr')){
           document.getElementById('c-shipaddr').value=p.address;
         }
+        renderPreviousCaseHistory(p.id);
       }
     }
     addRxRow();
@@ -1501,6 +1809,7 @@ function selectConsultPatient(id,name,mobile){
   document.getElementById('c-selected').textContent='✅ '+name+' · '+id + displayAgeGender + displayMobile;
   document.getElementById('c-selected').classList.remove('hidden');
   if(p&&p.address)document.getElementById('c-shipaddr')&&(document.getElementById('c-shipaddr').value=p.address);
+  renderPreviousCaseHistory(id);
   saveConsultDraft();
 }
 
@@ -1581,15 +1890,41 @@ async function saveConsult(){
   const payStatus=document.getElementById('c-paystatus').value;
   const caseId='REC-'+Date.now();
 
+  const prescriptionSummary = prescriptions.map(rx => {
+    let summary = rx.name;
+    if (rx.potency) summary += ` (${rx.potency})`;
+    if (rx.dosage) summary += ` ${rx.dosage}`;
+    if (rx.duration) summary += ` - ${rx.duration}`;
+    return summary;
+  }).join('; ');
+
   const consult={
-    id:caseId,patientId:pid,date:today(),visitType,
-    complaint,duration:document.getElementById('c-duration').value,
+    id:caseId,
+    patientId:pid,
+    date:document.getElementById('c-visit-date')?.value || today(),
+    visitDate:document.getElementById('c-visit-date')?.value || today(),
+    visitTime:document.getElementById('c-visit-time')?.value || new Date().toTimeString().slice(0,5),
+    visitType,
+    complaint,
+    chiefComplaint: complaint,
+    duration:document.getElementById('c-duration').value,
+    symptoms:document.getElementById('c-symptoms')?.value || '',
+    diagnosis:document.getElementById('c-diagnosis')?.value || '',
     notes:document.getElementById('c-notes').value,
+    clinicalNotes:document.getElementById('c-notes').value,
     prescriptions,
-    followUpDate:document.getElementById('c-followup').value||'',
-    payStatus,fee,medCharge,courierCharge,
+    prescriptionSummary,
+    followUpDays:parseInt(document.getElementById('c-followup-days')?.value) || 0,
+    followUpDate:document.getElementById('c-followup-date')?.value || '',
+    doctorName: currentUser?.name || 'Dr. Self',
+    payStatus,
+    fee,
+    medCharge,
+    courierCharge,
+    createdAt: today(),
     updatedAt:Date.now()
   };
+
   const cases=getAll(KEYS.CASES);
   cases.unshift(consult);
   saveAll(KEYS.CASES,cases);
