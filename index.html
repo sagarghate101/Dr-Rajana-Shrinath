@@ -485,7 +485,13 @@ async function loadFromGoogleSheets() {
   // Refresh current state
   if (currentUser) {
     buildNav();
-    renderView();
+    const isTyping = document.activeElement && 
+      (document.activeElement.tagName === 'INPUT' || 
+       document.activeElement.tagName === 'TEXTAREA' || 
+       document.activeElement.tagName === 'SELECT');
+    if (activeTab !== 'consult' && !isTyping) {
+      renderView();
+    }
   } else {
     const cfg = ls(KEYS.SETTINGS) || {};
     document.getElementById('clinic-name-display').textContent = cfg.clinicName || 'Homeopathy Clinic';
@@ -1226,11 +1232,57 @@ async function saveMedHistory(pid){
 
 // ==================== CONSULTATION ====================
 function startConsult(pid){
-  navParam=pid;
-  navigate('consult');
+  navigate('consult', pid);
 }
 
 let rxList=[];
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function saveConsultDraft() {
+  if (activeTab !== 'consult') return;
+  const draft = {
+    pid: document.getElementById('c-pid')?.value || '',
+    search: document.getElementById('c-search')?.value || '',
+    selectedText: document.getElementById('c-selected')?.textContent || '',
+    selectedHidden: document.getElementById('c-selected')?.classList.contains('hidden') ?? true,
+    visitType: document.querySelector('input[name="vtype"]:checked')?.value || 'walkin',
+    complaint: document.getElementById('c-complaint')?.value || '',
+    duration: document.getElementById('c-duration')?.value || '',
+    notes: document.getElementById('c-notes')?.value || '',
+    followup: document.getElementById('c-followup')?.value || '',
+    fee: document.getElementById('c-fee')?.value || '',
+    medcharge: document.getElementById('c-medcharge')?.value || '',
+    paymode: document.getElementById('c-paymode')?.value || 'Cash',
+    paystatus: document.getElementById('c-paystatus')?.value || 'Paid',
+    shipaddr: document.getElementById('c-shipaddr')?.value || '',
+    couriercharge: document.getElementById('c-couriercharge')?.value || '',
+    prescriptions: collectRx()
+  };
+  localStorage.setItem('hom_consult_draft', JSON.stringify(draft));
+}
+
+function clearConsultForm() {
+  if (confirm('Are you sure you want to clear all fields in this consultation?')) {
+    localStorage.removeItem('hom_consult_draft');
+    navParam = null;
+    renderConsult();
+  }
+}
+
+function attachConsultDraftListeners() {
+  const container = document.getElementById('content');
+  if (!container) return;
+  container.addEventListener('input', (e) => {
+    if (activeTab === 'consult') saveConsultDraft();
+  });
+  container.addEventListener('change', (e) => {
+    if (activeTab === 'consult') saveConsultDraft();
+  });
+}
 
 function renderConsult(){
   const patients=getAll(KEYS.PATIENTS);
@@ -1341,21 +1393,89 @@ function renderConsult(){
     <div id="c-err" class="alert alert-error hidden" style="margin:12px 0;"></div>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button class="btn btn-secondary" style="flex:1;" onclick="navigate('patients')">← Back</button>
+      <button class="btn btn-danger" style="flex:1;" onclick="clearConsultForm()">Reset</button>
       <button class="btn btn-primary" style="flex:2;" onclick="saveConsult()">💾 Save Consultation</button>
     </div>
   </div>`;
 
-  // Pre-select patient
-  if(preselected){
-    const p=patients.find(pt=>pt.id===preselected);
-    if(p){
-      document.getElementById('c-pid').value=p.id;
-      document.getElementById('c-search').value=p.name+' ('+p.mobile+')';
-      document.getElementById('c-selected').textContent='✅ '+p.name+' · '+p.id;
-      document.getElementById('c-selected').classList.remove('hidden');
+  // Restore logic
+  let draft = null;
+  try {
+    draft = JSON.parse(localStorage.getItem('hom_consult_draft'));
+  } catch(e) {}
+
+  if(draft){
+    if(document.getElementById('c-complaint')) document.getElementById('c-complaint').value=draft.complaint||'';
+    if(document.getElementById('c-duration')) document.getElementById('c-duration').value=draft.duration||'';
+    if(document.getElementById('c-notes')) document.getElementById('c-notes').value=draft.notes||'';
+    if(document.getElementById('c-followup')) document.getElementById('c-followup').value=draft.followup||'';
+    if(document.getElementById('c-fee')) document.getElementById('c-fee').value=draft.fee||'';
+    if(document.getElementById('c-medcharge')) document.getElementById('c-medcharge').value=draft.medcharge||'';
+    if(document.getElementById('c-paymode')) document.getElementById('c-paymode').value=draft.paymode||'Cash';
+    if(document.getElementById('c-paystatus')) document.getElementById('c-paystatus').value=draft.paystatus||'Paid';
+    if(document.getElementById('c-shipaddr')) document.getElementById('c-shipaddr').value=draft.shipaddr||'';
+    if(document.getElementById('c-couriercharge')) document.getElementById('c-couriercharge').value=draft.couriercharge||'';
+
+    if(draft.visitType==='online'){
+      const radioOnline = document.querySelector('input[name="vtype"][value="online"]');
+      if(radioOnline){ radioOnline.checked=true; toggleOnlineFields(true); }
+    } else {
+      const radioWalkin = document.querySelector('input[name="vtype"][value="walkin"]');
+      if(radioWalkin){ radioWalkin.checked=true; toggleOnlineFields(false); }
     }
+
+    let finalPid = draft.pid||'';
+    let finalSearch = draft.search||'';
+    let finalSelectedText = draft.selectedText||'';
+    let finalSelectedHidden = draft.selectedHidden??true;
+
+    if(preselected){
+      const p=patients.find(pt=>pt.id===preselected);
+      if(p){
+        finalPid=p.id;
+        finalSearch=p.name+' ('+p.mobile+')';
+        finalSelectedText='✅ '+p.name+' · '+p.id+' · '+p.age+'y · '+p.gender+' · '+p.mobile;
+        finalSelectedHidden=false;
+        if(p.address && !draft.shipaddr){
+          if(document.getElementById('c-shipaddr')){
+            document.getElementById('c-shipaddr').value=p.address;
+          }
+        }
+      }
+    }
+
+    if(document.getElementById('c-pid')) document.getElementById('c-pid').value=finalPid;
+    if(document.getElementById('c-search')) document.getElementById('c-search').value=finalSearch;
+    const selEl=document.getElementById('c-selected');
+    if(selEl){
+      selEl.textContent=finalSelectedText;
+      selEl.classList.toggle('hidden', finalSelectedHidden);
+    }
+
+    if(Array.isArray(draft.prescriptions) && draft.prescriptions.length>0){
+      draft.prescriptions.forEach(rx => {
+        addRxRow(rx.name, rx.potency, rx.dosage, rx.duration);
+      });
+    } else {
+      addRxRow();
+    }
+  } else {
+    if(preselected){
+      const p=patients.find(pt=>pt.id===preselected);
+      if(p){
+        document.getElementById('c-pid').value=p.id;
+        document.getElementById('c-search').value=p.name+' ('+p.mobile+')';
+        document.getElementById('c-selected').textContent='✅ '+p.name+' · '+p.id+' · '+p.age+'y · '+p.gender+' · '+p.mobile;
+        document.getElementById('c-selected').classList.remove('hidden');
+        if(p.address && document.getElementById('c-shipaddr')){
+          document.getElementById('c-shipaddr').value=p.address;
+        }
+      }
+    }
+    addRxRow();
   }
-  addRxRow();
+
+  attachConsultDraftListeners();
 }
 
 function searchConsultPatient(){
@@ -1375,18 +1495,22 @@ function selectConsultPatient(id,name,mobile){
   document.getElementById('c-pid').value=id;
   document.getElementById('c-search').value=name+' ('+mobile+')';
   document.getElementById('c-suggestions').innerHTML='';
-  document.getElementById('c-selected').textContent='✅ '+name+' · '+id;
-  document.getElementById('c-selected').classList.remove('hidden');
   const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===id);
+  const displayMobile = mobile ? ' · ' + mobile : '';
+  const displayAgeGender = p ? ' · ' + p.age + 'y · ' + p.gender : '';
+  document.getElementById('c-selected').textContent='✅ '+name+' · '+id + displayAgeGender + displayMobile;
+  document.getElementById('c-selected').classList.remove('hidden');
   if(p&&p.address)document.getElementById('c-shipaddr')&&(document.getElementById('c-shipaddr').value=p.address);
+  saveConsultDraft();
 }
 
 function toggleOnlineFields(show){
   document.getElementById('courier-section').classList.toggle('hidden',!show);
+  saveConsultDraft();
 }
 
 let rxRowCount=0;
-function addRxRow(){
+function addRxRow(name='', potency='', dosage='', duration=''){
   rxRowCount++;
   const medicines=getAll(KEYS.MEDICINES);
   const medOptions=medicines.map(m=>`<option value="${m.name}">${m.name} (${m.potency})</option>`).join('');
@@ -1397,31 +1521,33 @@ function addRxRow(){
   <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
     <div style="flex:2;min-width:160px;">
       <label class="label">Medicine Name</label>
-      <input class="input" id="rx-name-${rxRowCount}" placeholder="Type or select" list="med-list-${rxRowCount}"/>
+      <input class="input" id="rx-name-${rxRowCount}" placeholder="Type or select" list="med-list-${rxRowCount}" value="${escapeHtml(name)}"/>
       <datalist id="med-list-${rxRowCount}">${medOptions}</datalist>
     </div>
     <div style="flex:1;min-width:80px;">
       <label class="label">Potency</label>
-      <input class="input" id="rx-potency-${rxRowCount}" placeholder="30C, 200C, 1M"/>
+      <input class="input" id="rx-potency-${rxRowCount}" placeholder="30C, 200C, 1M" value="${escapeHtml(potency)}"/>
     </div>
     <div style="flex:1;min-width:80px;">
       <label class="label">Dosage</label>
-      <input class="input" id="rx-dosage-${rxRowCount}" placeholder="4 pills TDS"/>
+      <input class="input" id="rx-dosage-${rxRowCount}" placeholder="4 pills TDS" value="${escapeHtml(dosage)}"/>
     </div>
     <div style="flex:1;min-width:80px;">
       <label class="label">Duration</label>
-      <input class="input" id="rx-duration-${rxRowCount}" placeholder="15 days"/>
+      <input class="input" id="rx-duration-${rxRowCount}" placeholder="15 days" value="${escapeHtml(duration)}"/>
     </div>
     <div style="padding-top:20px;">
       <button class="btn btn-danger btn-sm" onclick="removeRxRow(${rxRowCount})">🗑</button>
     </div>
   </div>`;
   document.getElementById('rx-list').appendChild(div);
+  saveConsultDraft();
 }
 
 function removeRxRow(n){
   const el=document.getElementById(`rx-row-${n}`);
   if(el)el.remove();
+  saveConsultDraft();
 }
 
 function collectRx(){
@@ -1501,6 +1627,7 @@ async function saveConsult(){
   }
 
   navParam=null;
+  localStorage.removeItem('hom_consult_draft');
   navigate('patients');
   setTimeout(()=>alert('✅ Consultation saved successfully!'),100);
   await syncToGoogleSheets();
