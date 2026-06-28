@@ -243,7 +243,8 @@ const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxsVI5Iz02B4I9pPh4l
 const KEYS={
   PATIENTS:'hom_patients',CASES:'hom_cases',COURIERS:'hom_couriers',
   BILLING:'hom_billing',APPOINTMENTS:'hom_appointments',MEDICINES:'hom_medicines',
-  USER:'hom_user',SYNC:'hom_sync',SETTINGS:'hom_settings'
+  USER:'hom_user',SETTINGS:'hom_settings',OFFLINE_QUEUE:'hom_offline_queue',
+  LAST_MODAL:'hom_last_modal_state'
 };
 
 function ls(key){try{return JSON.parse(localStorage.getItem(key)||'null');}catch{return null;}}
@@ -259,141 +260,179 @@ function initDB(){
   if(!ls(KEYS.COURIERS)) ss(KEYS.COURIERS,[]);
   if(!ls(KEYS.BILLING)) ss(KEYS.BILLING,[]);
   if(!ls(KEYS.APPOINTMENTS)) ss(KEYS.APPOINTMENTS,[]);
-  if(!ls(KEYS.SYNC)) ss(KEYS.SYNC,{url:'',enabled:true});
+  if(!ls(KEYS.OFFLINE_QUEUE)) ss(KEYS.OFFLINE_QUEUE,[]);
   if(!ls(KEYS.SETTINGS)) ss(KEYS.SETTINGS,{clinicName:"Dr. Sharma's Homeopathy Clinic",doctorName:"Dr. Anjali Sharma",doctorPin:"1234",receptionistName:"Neha Deshmukh",receptionistPin:"4321"});
 }
 
 const DEFAULT_MEDICINES=[
-  {id:'MED-001',name:'Arsenicum Album',potency:'30C',stock:15,minStock:5,category:'Dilution',price:150},
-  {id:'MED-002',name:'Nux Vomica',potency:'200C',stock:8,minStock:5,category:'Dilution',price:180},
-  {id:'MED-003',name:'Pulsatilla',potency:'30C',stock:12,minStock:4,category:'Dilution',price:150},
-  {id:'MED-004',name:'Sulphur',potency:'200C',stock:8,minStock:3,category:'Dilution',price:160},
-  {id:'MED-005',name:'Arnica Montana',potency:'Q',stock:20,minStock:6,category:'Mother Tincture',price:250},
-  {id:'MED-006',name:'Lycopodium',potency:'1M',stock:5,minStock:5,category:'Dilution',price:220},
-  {id:'MED-007',name:'Silicea',potency:'6X',stock:25,minStock:10,category:'Biochemic',price:120},
-  {id:'MED-008',name:'Belladonna',potency:'30C',stock:10,minStock:4,category:'Dilution',price:140},
-  {id:'MED-009',name:'Rhus Toxicodendron',potency:'200C',stock:7,minStock:3,category:'Dilution',price:170},
-  {id:'MED-010',name:'Calcarea Carb',potency:'200C',stock:6,minStock:3,category:'Dilution',price:180},
-  {id:'MED-011',name:'Natrum Mur',potency:'30C',stock:9,minStock:4,category:'Dilution',price:150},
-  {id:'MED-012',name:'Phosphorus',potency:'200C',stock:4,minStock:3,category:'Dilution',price:190},
-  {id:'MED-013',name:'Ignatia',potency:'200C',stock:6,minStock:3,category:'Dilution',price:160},
-  {id:'MED-014',name:'Sepia',potency:'200C',stock:5,minStock:3,category:'Dilution',price:170},
-  {id:'MED-015',name:'Thuja',potency:'1M',stock:3,minStock:2,category:'Dilution',price:210},
+  {MedicineID:'MED-001',name:'Arsenicum Album',potency:'30C',stock:15,minStock:5,category:'Dilution',price:150,lastUpdated:Date.now()},
+  {MedicineID:'MED-002',name:'Nux Vomica',potency:'200C',stock:8,minStock:5,category:'Dilution',price:180,lastUpdated:Date.now()},
+  {MedicineID:'MED-003',name:'Pulsatilla',potency:'30C',stock:12,minStock:4,category:'Dilution',price:150,lastUpdated:Date.now()},
+  {MedicineID:'MED-004',name:'Sulphur',potency:'200C',stock:8,minStock:3,category:'Dilution',price:160,lastUpdated:Date.now()},
+  {MedicineID:'MED-005',name:'Arnica Montana',potency:'Q',stock:20,minStock:6,category:'Mother Tincture',price:250,lastUpdated:Date.now()},
+  {MedicineID:'MED-006',name:'Lycopodium',potency:'1M',stock:5,minStock:5,category:'Dilution',price:220,lastUpdated:Date.now()},
+  {MedicineID:'MED-007',name:'Silicea',potency:'6X',stock:25,minStock:10,category:'Biochemic',price:120,lastUpdated:Date.now()},
+  {MedicineID:'MED-008',name:'Belladonna',potency:'30C',stock:10,minStock:4,category:'Dilution',price:140,lastUpdated:Date.now()},
+  {MedicineID:'MED-009',name:'Rhus Toxicodendron',potency:'200C',stock:7,minStock:3,category:'Dilution',price:170,lastUpdated:Date.now()},
+  {MedicineID:'MED-010',name:'Calcarea Carb',potency:'200C',stock:6,minStock:3,category:'Dilution',price:180,lastUpdated:Date.now()},
+  {MedicineID:'MED-011',name:'Natrum Mur',potency:'30C',stock:9,minStock:4,category:'Dilution',price:150,lastUpdated:Date.now()},
+  {MedicineID:'MED-012',name:'Phosphorus',potency:'200C',stock:4,minStock:3,category:'Dilution',price:190,lastUpdated:Date.now()},
+  {MedicineID:'MED-013',name:'Ignatia',potency:'200C',stock:6,minStock:3,category:'Dilution',price:160,lastUpdated:Date.now()},
+  {MedicineID:'MED-014',name:'Sepia',potency:'200C',stock:5,minStock:3,category:'Dilution',price:170,lastUpdated:Date.now()},
+  {MedicineID:'MED-015',name:'Thuja',potency:'1M',stock:3,minStock:2,category(--teal-600),price:210,lastUpdated:Date.now()}
 ];
 
-// ==================== AUTO SYNCHRONIZATION ARCHITECTURE ====================
-function mergeCollections(local, remote, key = 'id') {
-  const lookups = new Map();
-  remote.forEach(item => { if (item && item[key]) lookups.set(item[key], item); });
-  local.forEach(item => {
-    if (item && item[key]) {
-      if (!lookups.has(item[key])) {
-        lookups.set(item[key], item);
+// ==================== DETAILED SYNC ARCHITECTURE ====================
+
+function getPrimaryKey(storeKey) {
+  if(storeKey===KEYS.PATIENTS) return 'PatientID';
+  if(storeKey===KEYS.CASES) return 'CaseID';
+  if(storeKey===KEYS.COURIERS) return 'CourierID';
+  if(storeKey===KEYS.BILLING) return 'InvoiceID';
+  if(storeKey===KEYS.APPOINTMENTS) return 'AppointmentID';
+  if(storeKey===KEYS.MEDICINES) return 'MedicineID';
+  return 'id';
+}
+
+function mergeData(localArr, remoteArr, pk) {
+  const map = new Map();
+  remoteArr.forEach(item => { if(item && item[pk]) map.set(item[pk], item); });
+  localArr.forEach(item => {
+    if(item && item[pk]) {
+      if(!map.has(item[pk])) {
+        map.set(item[pk], item);
       } else {
-        lookups.set(item[key], Object.assign({}, lookups.get(item[key]), item));
+        const remoteItem = map.get(item[pk]);
+        const remoteTime = remoteItem.lastUpdated || 0;
+        const localTime = item.lastUpdated || 0;
+        if(localTime >= remoteTime) {
+          map.set(item[pk], Object.assign({}, remoteItem, item));
+        }
       }
     }
   });
-  return Array.from(lookups.values());
+  return Array.from(map.values());
+}
+
+function addToQueue(action, type, data) {
+  let queue = getAll(KEYS.OFFLINE_QUEUE);
+  queue.push({ action, type, data, timestamp: Date.now() });
+  saveAll(KEYS.OFFLINE_QUEUE, queue);
+}
+
+async function processOfflineQueue() {
+  if(!navigator.onLine) return;
+  let queue = getAll(KEYS.OFFLINE_QUEUE);
+  if(queue.length === 0) return;
+  
+  for(let task of queue) {
+    let currentData = getAll(task.type);
+    let pk = getPrimaryKey(task.type);
+    if(task.action === 'SAVE' || task.action === 'EDIT') {
+      let idx = currentData.findIndex(x => x[pk] === task.data[pk]);
+      if(idx !== -1) currentData[idx] = task.data;
+      else currentData.unshift(task.data);
+    } else if(task.action === 'DELETE') {
+      currentData = currentData.filter(x => x[pk] !== task.data[pk]);
+    }
+    saveAll(task.type, currentData);
+  }
+  saveAll(KEYS.OFFLINE_QUEUE, []);
+  await syncToGoogleSheets();
 }
 
 async function loadFromGoogleSheets() {
-  if (!navigator.onLine) {
-    updateSyncBadge();
-    return;
-  }
+  if(!navigator.onLine) { updateSyncBadge(); return; }
   try {
-    const response = await fetch(WEB_APP_URL + "?action=get_data");
-    if (!response.ok) throw new Error("Network error loading remote parameters");
-    const remoteData = await response.json();
-    if (remoteData) {
-      if (Array.isArray(remoteData.patients)) saveAll(KEYS.PATIENTS, remoteData.patients);
-      if (Array.isArray(remoteData.cases)) saveAll(KEYS.CASES, remoteData.cases);
-      if (Array.isArray(remoteData.couriers)) saveAll(KEYS.COURIERS, remoteData.couriers);
-      if (Array.isArray(remoteData.billing)) saveAll(KEYS.BILLING, remoteData.billing);
-      if (Array.isArray(remoteData.appointments)) saveAll(KEYS.APPOINTMENTS, remoteData.appointments);
-      if (Array.isArray(remoteData.medicines)) saveAll(KEYS.MEDICINES, remoteData.medicines);
+    const res = await fetch(WEB_APP_URL + "?action=get_data");
+    const remote = await res.json();
+    if(remote) {
+      if(remote.patients) saveAll(KEYS.PATIENTS, mergeData(getAll(KEYS.PATIENTS), remote.patients, 'PatientID'));
+      if(remote.cases) saveAll(KEYS.CASES, mergeData(getAll(KEYS.CASES), remote.cases, 'CaseID'));
+      if(remote.couriers) saveAll(KEYS.COURIERS, mergeData(getAll(KEYS.COURIERS), remote.couriers, 'CourierID'));
+      if(remote.billing) saveAll(KEYS.BILLING, mergeData(getAll(KEYS.BILLING), remote.billing, 'InvoiceID'));
+      if(remote.appointments) saveAll(KEYS.APPOINTMENTS, mergeData(getAll(KEYS.APPOINTMENTS), remote.appointments, 'AppointmentID'));
+      if(remote.medicines) saveAll(KEYS.MEDICINES, mergeData(getAll(KEYS.MEDICINES), remote.medicines, 'MedicineID'));
       
-      const currentSyncObj = ls(KEYS.SYNC) || {};
-      currentSyncObj.lastSync = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      ss(KEYS.SYNC, currentSyncObj);
+      let syncState = ls('sync_meta') || {};
+      syncState.lastSync = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
+      ss('sync_meta', syncState);
     }
     updateSyncBadge();
-    if (!document.getElementById('app').classList.contains('hidden')) {
-      renderView();
-    }
-  } catch (error) {
-    console.warn("Sync failed, operating locally:", error);
+    refreshActiveViews();
+  } catch(e) {
+    console.error("Fetch cycle failure", e);
     updateSyncBadge();
   }
 }
 
 async function syncToGoogleSheets() {
-  if (!navigator.onLine) {
-    updateSyncBadge();
-    return;
-  }
+  if(!navigator.onLine) { updateSyncBadge(); return; }
   try {
-    let freshRemoteState = {};
-    try {
-      const ping = await fetch(WEB_APP_URL + "?action=get_data");
-      if (ping.ok) freshRemoteState = await ping.json();
-    } catch(e) {
-      console.warn("Pre-fetch failed, forcing fast merge sync mode");
-    }
-
-    const mergedPatients = mergeCollections(getAll(KEYS.PATIENTS), freshRemoteState.patients || [], 'id');
-    const mergedCases = mergeCollections(getAll(KEYS.CASES), freshRemoteState.cases || [], 'id');
-    const mergedCouriers = mergeCollections(getAll(KEYS.COURIERS), freshRemoteState.couriers || [], 'id');
-    const mergedBilling = mergeCollections(getAll(KEYS.BILLING), freshRemoteState.billing || [], 'id');
-    const mergedAppointments = mergeCollections(getAll(KEYS.APPOINTMENTS), freshRemoteState.appointments || [], 'id');
-    const mergedMedicines = mergeCollections(getAll(KEYS.MEDICINES), freshRemoteState.medicines || [], 'id');
-
-    saveAll(KEYS.PATIENTS, mergedPatients);
-    saveAll(KEYS.CASES, mergedCases);
-    saveAll(KEYS.COURIERS, mergedCouriers);
-    saveAll(KEYS.BILLING, mergedBilling);
-    saveAll(KEYS.APPOINTMENTS, mergedAppointments);
-    saveAll(KEYS.MEDICINES, mergedMedicines);
-
-    const completePayload = {
+    const payload = {
       action: "sync_all",
-      patients: mergedPatients,
-      cases: mergedCases,
-      couriers: mergedCouriers,
-      billing: mergedBilling,
-      appointments: mergedAppointments,
-      medicines: mergedMedicines
+      patients: getAll(KEYS.PATIENTS),
+      cases: getAll(KEYS.CASES),
+      couriers: getAll(KEYS.COURIERS),
+      billing: getAll(KEYS.BILLING),
+      appointments: getAll(KEYS.APPOINTMENTS),
+      medicines: getAll(KEYS.MEDICINES)
     };
 
-    await fetch(WEB_APP_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(completePayload)
+    const response = await fetch(WEB_APP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
     });
-
-    await loadFromGoogleSheets();
-  } catch (err) {
-    console.error("Critical upload transaction dropped:", err);
+    
+    if(response.ok) {
+      await loadFromGoogleSheets();
+    }
+  } catch(e) {
+    console.error("Upload process failure", e);
     updateSyncBadge();
   }
 }
 
-function manualSync() {
-  loadFromGoogleSheets();
+function refreshActiveViews() {
+  if(document.getElementById('app').classList.contains('hidden')) return;
+  renderView();
+  
+  let openModal = ls(KEYS.LAST_MODAL);
+  if(openModal && openModal.active) {
+    if(openModal.type === 'detail' && openModal.id) {
+      showPatientDetail(openModal.id, true);
+    }
+  }
 }
 
-function triggerSync() {
-  syncToGoogleSheets();
+async function executeCrud(storeKey, action, itemData) {
+  let pk = getPrimaryKey(storeKey);
+  itemData.lastUpdated = Date.now();
+  let dataList = getAll(storeKey);
+
+  if(action === 'SAVE' || action === 'EDIT') {
+    let idx = dataList.findIndex(x => x[pk] === itemData[pk]);
+    if(idx !== -1) dataList[idx] = itemData;
+    else dataList.unshift(itemData);
+  } else if(action === 'DELETE') {
+    dataList = dataList.filter(x => x[pk] !== itemData[pk]);
+  }
+  
+  saveAll(storeKey, dataList);
+  refreshActiveViews();
+
+  if(!navigator.onLine) {
+    addToQueue(action, storeKey, itemData);
+    updateSyncBadge();
+  } else {
+    await syncToGoogleSheets();
+  }
 }
 
-window.addEventListener('online', () => {
-  syncToGoogleSheets();
-});
-window.addEventListener('offline', () => {
-  updateSyncBadge();
-});
+// ==================== AUTOMATED LIFECYCLE ====================
+window.addEventListener('online', async () => { await processOfflineQueue(); });
+window.addEventListener('offline', () => { updateSyncBadge(); });
 setInterval(loadFromGoogleSheets, 30000);
 
 // ==================== AUTH ====================
@@ -504,23 +543,25 @@ async function startApp(){
   buildNav();
   updateSyncBadge();
   await loadFromGoogleSheets();
-  renderView();
 }
 
 function updateSyncBadge(){
   const el=document.getElementById('sync-badge');
   if(!el) return;
-  if(!navigator.onLine){
-    el.textContent='⚠️ Offline Mode';
+  let localQueue = getAll(KEYS.OFFLINE_QUEUE);
+  
+  if(!navigator.onLine || localQueue.length > 0){
+    el.textContent='⚠️ Offline Mode (' + localQueue.length + ' Pending)';
     el.style.display='';
     el.style.background='var(--rose-50)';
     el.style.color='var(--rose-700)';
     el.style.borderColor='var(--rose-100)';
     return;
   }
-  const sync=ls(KEYS.SYNC)||{};
-  if(sync.enabled&&sync.lastSync){
-    el.textContent='Synced: '+sync.lastSync;
+  
+  let syncState = ls('sync_meta') || {};
+  if(syncState.lastSync){
+    el.textContent='Synced: '+syncState.lastSync;
     el.style.display='';
     el.style.background='var(--emerald-50)';
     el.style.color='var(--emerald-700)';
@@ -550,7 +591,7 @@ function renderView(){
 function fmt(n){return'₹'+(n||0).toLocaleString('en-IN');}
 function today(){return new Date().toISOString().split('T')[0];}
 function fmtDate(d){if(!d)return'-';const dt=new Date(d);return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}
-function genId(prefix,list){return`${prefix}-${(list.length+1).toString().padStart(4,'0')}`;}
+function genId(prefix,list,pk){return`${prefix}-${(list.length+1).toString().padStart(4,'0')}`;}
 function patientInitials(name){return name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);}
 
 // ==================== DASHBOARD ====================
@@ -560,16 +601,13 @@ function renderDashboard(){
   const couriers=getAll(KEYS.COURIERS);
   const billing=getAll(KEYS.BILLING);
   const medicines=getAll(KEYS.MEDICINES);
-  const appts=getAll(KEYS.APPOINTMENTS);
 
   const todayCases=cases.filter(c=>c.date===today()).length;
   const pendingCouriers=couriers.filter(c=>c.status!=='Delivered').length;
   const pendingPayments=billing.filter(b=>b.paymentStatus==='Pending').reduce((s,b)=>s+b.total,0);
   const lowStock=medicines.filter(m=>m.stock<=m.minStock).length;
 
-  // Today's follow-ups
   const todayFollowups=cases.filter(c=>c.followUpDate===today());
-  // Missed follow-ups (overdue)
   const missedFollowups=cases.filter(c=>c.followUpDate&&c.followUpDate<today()&&c.followUpDate!==today());
 
   const cfg=ls(KEYS.SETTINGS)||{};
@@ -610,7 +648,7 @@ function renderDashboard(){
       </div>
       ${todayFollowups.length===0?`<div class="empty-state" style="padding:20px;"><div class="empty-icon">✅</div><div class="empty-sub">No follow-ups today</div></div>`:''}
       ${todayFollowups.slice(0,4).map(c=>{
-        const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===c.patientId)||{name:'Unknown',mobile:''};
+        const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===c.patientId)||{name:'Unknown',mobile:''};
         return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--slate-100);">
           <div class="patient-avatar" style="width:32px;height:32px;font-size:11px;">${patientInitials(p.name)}</div>
           <div style="flex:1;">
@@ -629,7 +667,7 @@ function renderDashboard(){
       </div>
       ${missedFollowups.length===0?`<div class="empty-state" style="padding:20px;"><div class="empty-icon">✅</div><div class="empty-sub">No overdue follow-ups</div></div>`:''}
       ${missedFollowups.slice(0,4).map(c=>{
-        const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===c.patientId)||{name:'Unknown',mobile:''};
+        const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===c.patientId)||{name:'Unknown',mobile:''};
         const days=Math.floor((new Date()-new Date(c.followUpDate))/(1000*86400));
         return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--slate-100);">
           <div class="patient-avatar" style="width:32px;height:32px;font-size:11px;">${patientInitials(p.name)}</div>
@@ -697,7 +735,7 @@ function renderPatients(){
 function filterPatients(){
   const q=document.getElementById('patient-search').value.toLowerCase();
   const all=getAll(KEYS.PATIENTS);
-  const filtered=all.filter(p=>p.name.toLowerCase().includes(q)||p.mobile.includes(q)||p.id.toLowerCase().includes(q));
+  const filtered=all.filter(p=>p.name.toLowerCase().includes(q)||p.mobile.includes(q)||p.PatientID.toLowerCase().includes(q));
   renderPatientList(filtered);
 }
 
@@ -709,14 +747,14 @@ function renderPatientList(patients){
     return;
   }
   el.innerHTML=patients.map(p=>`
-  <div class="patient-row" onclick="showPatientDetail('${p.id}')">
+  <div class="patient-row" onclick="showPatientDetail('${p.PatientID}')">
     <div class="patient-avatar">${patientInitials(p.name)}</div>
     <div style="flex:1;">
       <div class="patient-name">${p.name}</div>
-      <div class="patient-meta">${p.mobile} · ${p.age}y · ${p.gender} · <span style="font-family:monospace;font-size:10px;">${p.id}</span></div>
+      <div class="patient-meta">${p.mobile} · ${p.age}y · ${p.gender} · <span style="font-family:monospace;font-size:10px;">${p.PatientID}</span></div>
     </div>
     <div style="display:flex;gap:6px;align-items:center;">
-      ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startConsult('${p.id}')">🩺 Consult</button>`:''}
+      ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startConsult('${p.PatientID}')">🩺 Consult</button>`:''}
       <span style="color:var(--slate-300);font-size:18px;">›</span>
     </div>
   </div>`).join('');
@@ -781,19 +819,22 @@ async function savePatient(){
   if(!name||!mobile||!age||!gender){err.textContent='Please fill required fields.';err.classList.remove('hidden');return;}
   const patients=getAll(KEYS.PATIENTS);
   const year=new Date().getFullYear();
-  const id=`HOM-${year}-${(patients.length+1).toString().padStart(4,'0')}`;
-  const p={id,name,mobile,age:parseInt(age),gender,address:document.getElementById('p-address').value,occupation:document.getElementById('p-occupation').value,bloodGroup:document.getElementById('p-blood').value,createdAt:today()};
-  patients.unshift(p);
-  saveAll(KEYS.PATIENTS,patients);
+  const PatientID=`HOM-${year}-${(patients.length+1).toString().padStart(4,'0')}`;
+  const p={PatientID,name,mobile,age:parseInt(age),gender,address:document.getElementById('p-address').value,occupation:document.getElementById('p-occupation').value,bloodGroup:document.getElementById('p-blood').value,createdAt:today()};
+  
   closeModal();
-  await syncToGoogleSheets();
-  renderPatients();
+  await executeCrud(KEYS.PATIENTS, 'SAVE', p);
 }
 
-function showPatientDetail(pid){
+function showPatientDetail(pid, isSilentRefresh=false){
   const patients=getAll(KEYS.PATIENTS);
-  const p=patients.find(pt=>pt.id===pid);
-  if(!p)return;
+  const p=patients.find(pt=>pt.PatientID===pid);
+  if(!p) return;
+  
+  if(!isSilentRefresh) {
+    ss(KEYS.LAST_MODAL, { active: true, type: 'detail', id: pid });
+  }
+  
   const cases=getAll(KEYS.CASES).filter(c=>c.patientId===pid).sort((a,b)=>b.date.localeCompare(a.date));
   showModal(`
   <div class="modal-header">
@@ -801,7 +842,7 @@ function showPatientDetail(pid){
       <div class="patient-avatar" style="width:48px;height:48px;font-size:16px;">${patientInitials(p.name)}</div>
       <div>
         <div class="modal-title">${p.name}</div>
-        <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${p.id}</div>
+        <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${p.PatientID}</div>
       </div>
     </div>
     <button class="close-btn" onclick="closeModal()">✕</button>
@@ -815,9 +856,9 @@ function showPatientDetail(pid){
   ${p.address?`<div class="card-sm" style="margin-bottom:12px;"><div class="label">Address</div><div style="font-size:12px;color:var(--slate-600);">${p.address}</div></div>`:''}
 
   <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-    ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="closeModal();startConsult('${p.id}')">🩺 New Consultation</button>`:''}
-    <button class="btn btn-secondary btn-sm" onclick="showEditPatient('${p.id}')">✏️ Edit</button>
-    <button class="btn btn-secondary btn-sm" onclick="showMedHistory('${p.id}')">📋 Medical History</button>
+    ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="closeModal();startConsult('${p.PatientID}')">🩺 New Consultation</button>`:''}
+    <button class="btn btn-secondary btn-sm" onclick="showEditPatient('${p.PatientID}')">✏️ Edit</button>
+    <button class="btn btn-secondary btn-sm" onclick="showMedHistory('${p.PatientID}')">📋 Medical History</button>
   </div>
 
   <div style="font-size:13px;font-weight:800;color:var(--slate-700);margin-bottom:10px;">Visit History (${cases.length})</div>
@@ -838,7 +879,7 @@ function showPatientDetail(pid){
 }
 
 function showEditPatient(pid){
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===pid);
+  const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===pid);
   if(!p)return;
   showModal(`
   <div class="modal-header">
@@ -863,15 +904,16 @@ function showEditPatient(pid){
   </div>
   <div style="display:flex;gap:10px;">
     <button class="btn btn-secondary" style="flex:1;" onclick="closeModal()">Cancel</button>
-    <button class="btn btn-primary" style="flex:1;" onclick="updatePatient('${p.id}')">💾 Save</button>
+    <button class="btn btn-primary" style="flex:1;" onclick="updatePatient('${p.PatientID}')">💾 Save</button>
   </div>`);
 }
 
 async function updatePatient(pid){
   const patients=getAll(KEYS.PATIENTS);
-  const idx=patients.findIndex(p=>p.id===pid);
+  const idx=patients.findIndex(p=>p.PatientID===pid);
   if(idx===-1)return;
-  patients[idx]={...patients[idx],
+  
+  let targetRecord = {...patients[idx],
     name:document.getElementById('ep-name').value,
     mobile:document.getElementById('ep-mobile').value,
     age:parseInt(document.getElementById('ep-age').value),
@@ -880,10 +922,9 @@ async function updatePatient(pid){
     occupation:document.getElementById('ep-occupation').value,
     bloodGroup:document.getElementById('ep-blood').value,
   };
-  saveAll(KEYS.PATIENTS,patients);
+  
   closeModal();
-  await syncToGoogleSheets();
-  renderPatients();
+  await executeCrud(KEYS.PATIENTS, 'EDIT', targetRecord);
 }
 
 function showMedHistory(pid){
@@ -922,9 +963,8 @@ function showMedHistory(pid){
 }
 
 async function saveMedHistory(pid){
-  const cases=getAll(KEYS.CASES);
   const entry={patientId:pid,date:today(),type:'history',
-    id:'HIS-'+Date.now(),
+    CaseID:'HIS-'+Date.now(),
     complaint:document.getElementById('mh-complaint').value,
     symptoms:document.getElementById('mh-symptoms').value,
     duration:document.getElementById('mh-duration').value,
@@ -939,10 +979,9 @@ async function saveMedHistory(pid){
     thermalNature:document.getElementById('mh-thermal').value,
     prescriptions:[],visitType:'history'
   };
-  cases.unshift(entry);
-  saveAll(KEYS.CASES,cases);
+  
   closeModal();
-  await syncToGoogleSheets();
+  await executeCrud(KEYS.CASES, 'SAVE', entry);
   alert('Medical history saved!');
 }
 
@@ -956,7 +995,6 @@ let rxList=[];
 
 function renderConsult(){
   const patients=getAll(KEYS.PATIENTS);
-  const medicines=getAll(KEYS.MEDICINES);
   const preselected=navParam;
   rxList=[];
 
@@ -1061,13 +1099,12 @@ function renderConsult(){
     </div>
   </div>`;
 
-  // Pre-select patient
   if(preselected){
-    const p=patients.find(pt=>pt.id===preselected);
+    const p=patients.find(pt=>pt.PatientID===preselected);
     if(p){
-      document.getElementById('c-pid').value=p.id;
+      document.getElementById('c-pid').value=p.PatientID;
       document.getElementById('c-search').value=p.name+' ('+p.mobile+')';
-      document.getElementById('c-selected').textContent='✅ '+p.name+' · '+p.id;
+      document.getElementById('c-selected').textContent='✅ '+p.name+' · '+p.PatientID;
       document.getElementById('c-selected').classList.remove('hidden');
     }
   }
@@ -1081,8 +1118,8 @@ function searchConsultPatient(){
   const box=document.getElementById('c-suggestions');
   if(!q||matches.length===0){box.innerHTML='';return;}
   box.innerHTML=`<div style="position:absolute;top:4px;left:0;right:0;background:#fff;border:1px solid var(--slate-200);border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.1);z-index:50;overflow:hidden;">
-    ${matches.map(p=>`<div style="padding:10px 14px;cursor:pointer;font-size:12px;font-weight:600;border-bottom:1px solid var(--slate-100);" onmouseover="this.style.background='var(--teal-50)'" onmouseout="this.style.background=''" onclick="selectConsultPatient('${p.id}','${p.name}','${p.mobile}')">
-      <strong>${p.name}</strong> <span style="color:var(--slate-400);">${p.mobile} · ${p.id}</span>
+    ${matches.map(p=>`<div style="padding:10px 14px;cursor:pointer;font-size:12px;font-weight:600;border-bottom:1px solid var(--slate-100);" onmouseover="this.style.background='var(--teal-50)'" onmouseout="this.style.background=''" onclick="selectConsultPatient('${p.PatientID}','${p.name}','${p.mobile}')">
+      <strong>${p.name}</strong> <span style="color:var(--slate-400);">${p.mobile} · ${p.PatientID}</span>
     </div>`).join('')}
   </div>`;
 }
@@ -1093,8 +1130,7 @@ function selectConsultPatient(id,name,mobile){
   document.getElementById('c-suggestions').innerHTML='';
   document.getElementById('c-selected').textContent='✅ '+name+' · '+id;
   document.getElementById('c-selected').classList.remove('hidden');
-  // Auto fill ship address
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===id);
+  const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===id);
   if(p&&p.address)document.getElementById('c-shipaddr')&&(document.getElementById('c-shipaddr').value=p.address);
 }
 
@@ -1170,52 +1206,52 @@ async function saveConsult(){
   const medCharge=parseFloat(document.getElementById('c-medcharge').value)||0;
   const courierCharge=visitType==='online'?(parseFloat(document.getElementById('c-couriercharge').value)||0):0;
   const payStatus=document.getElementById('c-paystatus').value;
-  const caseId='REC-'+Date.now();
+  const CaseID='REC-'+Date.now();
 
   const consult={
-    id:caseId,patientId:pid,date:today(),visitType,
+    CaseID,patientId:pid,date:today(),visitType,
     complaint,duration:document.getElementById('c-duration').value,
     notes:document.getElementById('c-notes').value,
     prescriptions,
     followUpDate:document.getElementById('c-followup').value||'',
     payStatus,fee,medCharge,courierCharge,
   };
-  const cases=getAll(KEYS.CASES);
-  cases.unshift(consult);
-  saveAll(KEYS.CASES,cases);
+  
+  await executeCrud(KEYS.CASES, 'SAVE', consult);
 
-  // Billing entry
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===pid);
+  const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===pid);
   const total=fee+medCharge+courierCharge;
   if(total>0){
     const bills=getAll(KEYS.BILLING);
     const year=new Date().getFullYear();
-    bills.unshift({
-      id:`INV-${year}-${(bills.length+1).toString().padStart(4,'0')}`,
+    const InvoiceID=`INV-${year}-${(bills.length+1).toString().padStart(4,'0')}`;
+    
+    const targetBill = {
+      InvoiceID,
       patientId:pid,patientName:p?.name||'',date:today(),
       consultFee:fee,medCharge,courierCharge,total,
       payMode:document.getElementById('c-paymode').value,
       paymentStatus:payStatus
-    });
-    saveAll(KEYS.BILLING,bills);
+    };
+    await executeCrud(KEYS.BILLING, 'SAVE', targetBill);
   }
 
-  // Courier entry for online
   if(visitType==='online'&&prescriptions.length>0){
     const couriers=getAll(KEYS.COURIERS);
-    couriers.unshift({
-      id:'COU-'+(couriers.length+1).toString().padStart(3,'0'),
+    const CourierID='COU-'+(couriers.length+1).toString().padStart(3,'0');
+    
+    const targetCourier = {
+      CourierID,
       patientId:pid,patientName:p?.name||'',mobile:p?.mobile||'',
       address:document.getElementById('c-shipaddr').value,
-      caseId,status:'Prescription Ready',
+      caseId:CaseID,status:'Prescription Ready',
       dispatchDate:'',deliveryDate:'',carrier:'',tracking:'',notes:'',
       createdAt:today()
-    });
-    saveAll(KEYS.COURIERS,couriers);
+    };
+    await executeCrud(KEYS.COURIERS, 'SAVE', targetCourier);
   }
 
   navParam=null;
-  await syncToGoogleSheets();
   navigate('patients');
   setTimeout(()=>alert('✅ Consultation saved successfully!'),100);
 }
@@ -1260,7 +1296,7 @@ function filterCouriers(){
   const sf=document.getElementById('courier-status-filter')?.value||'All';
   const couriers=getAll(KEYS.COURIERS);
   const filtered=couriers.filter(c=>{
-    const mq=c.patientName.toLowerCase().includes(q)||c.id.toLowerCase().includes(q)||(c.tracking||'').toLowerCase().includes(q);
+    const mq=c.patientName.toLowerCase().includes(q)||c.CourierID.toLowerCase().includes(q)||(c.tracking||'').toLowerCase().includes(q);
     const ms=sf==='All'||c.status===sf;
     return mq&&ms;
   });
@@ -1280,7 +1316,7 @@ function renderCourierList(couriers){
     return`<div class="courier-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
         <div>
-          <div style="font-size:13px;font-weight:800;">${c.patientName} <span style="font-family:monospace;font-size:10px;color:var(--slate-400);">${c.id}</span></div>
+          <div style="font-size:13px;font-weight:800;">${c.patientName} <span style="font-family:monospace;font-size:10px;color:var(--slate-400);">${c.CourierID}</span></div>
           <div style="font-size:11px;color:var(--slate-400);">${c.mobile} · ${fmtDate(c.createdAt)}</div>
         </div>
         <span class="badge ${isDone?'badge-emerald':sIdx>=3?'badge-indigo':'badge-amber'}">${c.status}</span>
@@ -1301,9 +1337,9 @@ function renderCourierList(couriers){
       ${c.carrier?`<div style="font-size:11px;color:var(--indigo-600);margin-bottom:8px;font-weight:700;">🚚 ${c.carrier} · #${c.tracking}</div>`:''}
 
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-        <button class="btn btn-secondary btn-sm" onclick="showCourierEdit('${c.id}')">✏️ Tracking Info</button>
-        <button class="btn btn-secondary btn-sm" onclick="sendCourierWA('${c.id}')">💬 WhatsApp</button>
-        ${!isDone?`<button class="btn btn-primary btn-sm" onclick="progressCourier('${c.id}')">▶ Move to: ${COURIER_PIPELINE[sIdx+1]}</button>`:'<span class="badge badge-emerald">✅ Delivered</span>'}
+        <button class="btn btn-secondary btn-sm" onclick="showCourierEdit('${c.CourierID}')">✏️ Tracking Info</button>
+        <button class="btn btn-secondary btn-sm" onclick="sendCourierWA('${c.CourierID}')">💬 WhatsApp</button>
+        ${!isDone?`<button class="btn btn-primary btn-sm" onclick="progressCourier('${c.CourierID}')">▶ Move to: ${COURIER_PIPELINE[sIdx+1]}</button>`:'<span class="badge badge-emerald">✅ Delivered</span>'}
       </div>
     </div>`;
   }).join('');
@@ -1311,28 +1347,29 @@ function renderCourierList(couriers){
 
 async function progressCourier(id){
   const couriers=getAll(KEYS.COURIERS);
-  const idx=couriers.findIndex(c=>c.id===id);
+  const idx=couriers.findIndex(c=>c.CourierID===id);
   if(idx===-1)return;
   const sIdx=COURIER_PIPELINE.indexOf(couriers[idx].status);
   if(sIdx<COURIER_PIPELINE.length-1){
-    couriers[idx].status=COURIER_PIPELINE[sIdx+1];
-    if(couriers[idx].status==='Courier Dispatched')couriers[idx].dispatchDate=today();
-    if(couriers[idx].status==='Delivered')couriers[idx].deliveryDate=today();
-    saveAll(KEYS.COURIERS,couriers);
-    await syncToGoogleSheets();
+    let updated = {...couriers[idx]};
+    updated.status=COURIER_PIPELINE[sIdx+1];
+    if(updated.status==='Courier Dispatched') updated.dispatchDate=today();
+    if(updated.status==='Delivered') updated.deliveryDate=today();
+    
+    await executeCrud(KEYS.COURIERS, 'EDIT', updated);
     renderCourier();
   }
 }
 
 function showCourierEdit(id){
-  const c=getAll(KEYS.COURIERS).find(x=>x.id===id);
+  const c=getAll(KEYS.COURIERS).find(x=>x.CourierID===id);
   if(!c)return;
   showModal(`
   <div class="modal-header">
     <div class="modal-title">✏️ Update Courier Info</div>
     <button class="close-btn" onclick="closeModal()">✕</button>
   </div>
-  <div style="font-size:13px;font-weight:700;color:var(--teal-700);margin-bottom:14px;">${c.patientName} · ${c.id}</div>
+  <div style="font-size:13px;font-weight:700;color:var(--teal-700);margin-bottom:14px;">${c.patientName} · ${c.CourierID}</div>
   <div class="form-group"><label class="label">Courier Company</label>
     <input class="input" id="ce-carrier" value="${c.carrier||''}" placeholder="e.g. Professional Couriers, Delhivery"/>
   </div>
@@ -1350,19 +1387,22 @@ function showCourierEdit(id){
 
 async function saveCourierEdit(id){
   const couriers=getAll(KEYS.COURIERS);
-  const idx=couriers.findIndex(c=>c.id===id);
+  const idx=couriers.findIndex(c=>c.CourierID===id);
   if(idx===-1)return;
-  couriers[idx].carrier=document.getElementById('ce-carrier').value;
-  couriers[idx].tracking=document.getElementById('ce-tracking').value;
-  couriers[idx].notes=document.getElementById('ce-notes').value;
-  saveAll(KEYS.COURIERS,couriers);
+  
+  let updated = {...couriers[idx],
+    carrier: document.getElementById('ce-carrier').value,
+    tracking: document.getElementById('ce-tracking').value,
+    notes: document.getElementById('ce-notes').value
+  };
+  
   closeModal();
-  await syncToGoogleSheets();
+  await executeCrud(KEYS.COURIERS, 'EDIT', updated);
   renderCourier();
 }
 
 function sendCourierWA(id){
-  const c=getAll(KEYS.COURIERS).find(x=>x.id===id);
+  const c=getAll(KEYS.COURIERS).find(x=>x.CourierID===id);
   if(!c)return;
   const cfg=ls(KEYS.SETTINGS)||{};
   const drName=cfg.doctorName||'Doctor';
@@ -1414,7 +1454,7 @@ function filterBills(){
   const sf=document.getElementById('bill-status-filter')?.value||'All';
   const bills=getAll(KEYS.BILLING);
   const filtered=bills.filter(b=>{
-    const mq=b.patientName.toLowerCase().includes(q)||b.id.toLowerCase().includes(q);
+    const mq=b.patientName.toLowerCase().includes(q)||b.InvoiceID.toLowerCase().includes(q);
     const ms=sf==='All'||b.paymentStatus===sf;
     return mq&&ms;
   });
@@ -1432,7 +1472,7 @@ function renderBillList(bills){
   <div class="billing-row">
     <div style="flex:1;">
       <div style="font-size:12px;font-weight:800;color:var(--slate-800);">${b.patientName}</div>
-      <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${b.id} · ${fmtDate(b.date)}</div>
+      <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${b.InvoiceID} · ${fmtDate(b.date)}</div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:2px;">
         Consult: ${fmt(b.consultFee)} | Meds: ${fmt(b.medCharge)} ${b.courierCharge?'| Courier: '+fmt(b.courierCharge):''}
       </div>
@@ -1442,18 +1482,18 @@ function renderBillList(bills){
       <div style="margin-top:4px;">
         <span class="badge ${b.paymentStatus==='Paid'?'badge-emerald':'badge-amber'}">${b.paymentStatus}</span>
       </div>
-      ${b.paymentStatus==='Pending'?`<button class="btn btn-sm" style="margin-top:4px;background:var(--emerald-50);color:var(--emerald-700);border:1px solid var(--emerald-100);" onclick="markPaid('${b.id}')">✅ Mark Paid</button>`:''}
+      ${b.paymentStatus==='Pending'?`<button class="btn btn-sm" style="margin-top:4px;background:var(--emerald-50);color:var(--emerald-700);border:1px solid var(--emerald-100);" onclick="markPaid('${b.InvoiceID}')">✅ Mark Paid</button>`:''}
     </div>
   </div>`).join('');
 }
 
 async function markPaid(id){
   const bills=getAll(KEYS.BILLING);
-  const idx=bills.findIndex(b=>b.id===id);
+  const idx=bills.findIndex(b=>b.InvoiceID===id);
   if(idx!==-1){
-    bills[idx].paymentStatus='Paid';
-    saveAll(KEYS.BILLING,bills);
-    await syncToGoogleSheets();
+    let updated = {...bills[idx]};
+    updated.paymentStatus='Paid';
+    await executeCrud(KEYS.BILLING, 'EDIT', updated);
     renderBilling();
   }
 }
@@ -1510,7 +1550,7 @@ function renderMedList(medicines){
       <td style="padding:10px;text-align:center;"><span class="badge ${m.stock<=m.minStock?'badge-rose':'badge-emerald'}">${m.stock}</span></td>
       <td style="padding:10px;text-align:center;font-weight:700;">${fmt(m.price)}</td>
       <td style="padding:10px;text-align:center;">
-        <button class="btn btn-secondary btn-sm" onclick="showEditMed('${m.id}')">✏️</button>
+        <button class="btn btn-secondary btn-sm" onclick="showEditMed('${m.MedicineID}')">✏️</button>
       </td>
     </tr>`).join('')}
     </tbody>
@@ -1545,22 +1585,23 @@ async function saveMedicine(){
   const name=document.getElementById('am-name').value.trim();
   if(!name)return alert('Medicine name required!');
   const meds=getAll(KEYS.MEDICINES);
-  meds.push({
-    id:`MED-${(meds.length+1).toString().padStart(3,'0')}`,
+  
+  const targetMed = {
+    MedicineID:`MED-${(meds.length+1).toString().padStart(3,'0')}`,
     name,potency:document.getElementById('am-potency').value,
     category:document.getElementById('am-cat').value,
     stock:parseInt(document.getElementById('am-stock').value)||0,
     minStock:parseInt(document.getElementById('am-min').value)||5,
     price:parseFloat(document.getElementById('am-price').value)||0,
-  });
-  saveAll(KEYS.MEDICINES,meds);
+  };
+  
   closeModal();
-  await syncToGoogleSheets();
+  await executeCrud(KEYS.MEDICINES, 'SAVE', targetMed);
   renderInventory();
 }
 
 function showEditMed(id){
-  const m=getAll(KEYS.MEDICINES).find(x=>x.id===id);
+  const m=getAll(KEYS.MEDICINES).find(x=>x.MedicineID===id);
   if(!m)return;
   showModal(`
   <div class="modal-header">
@@ -1582,12 +1623,19 @@ function showEditMed(id){
 
 async function updateMed(id){
   const meds=getAll(KEYS.MEDICINES);
-  const idx=meds.findIndex(m=>m.id===id);
+  const idx=meds.findIndex(m=>m.MedicineID===id);
   if(idx===-1)return;
-  meds[idx]={...meds[idx],name:document.getElementById('em-name').value,potency:document.getElementById('em-potency').value,stock:parseInt(document.getElementById('em-stock').value)||0,minStock:parseInt(document.getElementById('em-min').value)||5,price:parseFloat(document.getElementById('em-price').value)||0};
-  saveAll(KEYS.MEDICINES,meds);
+  
+  let updated = {...meds[idx],
+    name:document.getElementById('em-name').value,
+    potency:document.getElementById('em-potency').value,
+    stock:parseInt(document.getElementById('em-stock').value)||0,
+    minStock:parseInt(document.getElementById('em-min').value)||5,
+    price:parseFloat(document.getElementById('em-price').value)||0
+  };
+  
   closeModal();
-  await syncToGoogleSheets();
+  await executeCrud(KEYS.MEDICINES, 'EDIT', updated);
   renderInventory();
 }
 
@@ -1636,7 +1684,7 @@ function renderApptList(appts){
     <div style="text-align:right;">
       <span class="badge ${a.status==='Completed'?'badge-emerald':a.status==='Cancelled'?'badge-rose':'badge-amber'}">${a.status}</span>
       <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;">
-        ${a.status==='Scheduled'?`<button class="btn btn-primary btn-sm" onclick="updateApptStatus('${a.id}','Completed')">✅</button><button class="btn btn-danger btn-sm" onclick="updateApptStatus('${a.id}','Cancelled')">✕</button>`:''}
+        ${a.status==='Scheduled'?`<button class="btn btn-primary btn-sm" onclick="updateApptStatus('${a.AppointmentID}','Completed')">✅</button><button class="btn btn-danger btn-sm" onclick="updateApptStatus('${a.AppointmentID}','Cancelled')">✕</button>`:''}
       </div>
     </div>
   </div>`).join('');
@@ -1651,7 +1699,7 @@ function showAddAppointment(){
   </div>
   <div class="form-group"><label class="label">Patient Name *</label>
     <input class="input" id="na-pname" placeholder="Patient name" list="na-plist"/>
-    <datalist id="na-plist">${patients.map(p=>`<option value="${p.name} (${p.mobile})" data-pid="${p.id}">`).join('')}</datalist>
+    <datalist id="na-plist">${patients.map(p=>`<option value="${p.name} (${p.mobile})" data-pid="${p.PatientID}">`).join('')}</datalist>
     <input type="hidden" id="na-pid"/>
   </div>
   <div class="form-group"><label class="label">Mobile</label><input class="input" id="na-mobile" placeholder="Mobile number"/></div>
@@ -1675,29 +1723,29 @@ async function saveAppt(){
   const pname=document.getElementById('na-pname').value.trim();
   const date=document.getElementById('na-date').value;
   if(!pname||!date)return alert('Name and date required!');
-  const appts=getAll(KEYS.APPOINTMENTS);
-  appts.push({
-    id:'APP-'+Date.now(),
+  
+  const targetAppt = {
+    AppointmentID:'APP-'+Date.now(),
     patientName:pname.split('(')[0].trim(),
     mobile:document.getElementById('na-mobile').value,
     date,time:document.getElementById('na-time').value,
     type:document.getElementById('na-type').value,
     status:'Scheduled',
     notes:document.getElementById('na-notes').value
-  });
-  saveAll(KEYS.APPOINTMENTS,appts);
+  };
+  
   closeModal();
-  await syncToGoogleSheets();
+  await executeCrud(KEYS.APPOINTMENTS, 'SAVE', targetAppt);
   renderAppointments();
 }
 
 async function updateApptStatus(id,status){
   const appts=getAll(KEYS.APPOINTMENTS);
-  const idx=appts.findIndex(a=>a.id===id);
+  const idx=appts.findIndex(a=>a.AppointmentID===id);
   if(idx!==-1){
-    appts[idx].status=status;
-    saveAll(KEYS.APPOINTMENTS,appts);
-    await syncToGoogleSheets();
+    let updated = {...appts[idx]};
+    updated.status=status;
+    await executeCrud(KEYS.APPOINTMENTS, 'EDIT', updated);
     renderAppointments();
   }
 }
@@ -1728,7 +1776,7 @@ function renderSettings(){
 
   <div class="card">
     <div style="font-size:14px;font-weight:800;color:var(--slate-700);margin-bottom:8px;">📊 Google Sheets Sync</div>
-    <div style="font-size:12px;color:var(--slate-500);margin-bottom:16px;">Data locally saves on this device. Fully functional cross-device synchronization pipeline is enabled active.</div>
+    <div style="font-size:12px;color:var(--slate-500);margin-bottom:16px;">Cross-device production-ready strict architecture. Datasets matched precisely by schema definitions.</div>
     <div class="form-group"><label class="label">Apps Script Web App URL</label>
       <input class="input" id="cfg-syncurl" value="${WEB_APP_URL}" disabled style="background:var(--slate-100);color:var(--slate-500);font-family:monospace;font-size:11px;"/>
     </div>
@@ -1749,23 +1797,30 @@ async function saveSettings(){
   };
   ss(KEYS.SETTINGS,cfg);
   document.getElementById('sb-clinic-name').textContent=cfg.clinicName||'Clinic';
-  await syncToGoogleSheets();
+  
+  if(!navigator.onLine) {
+    updateSyncBadge();
+  } else {
+    await syncToGoogleSheets();
+  }
   alert('✅ Settings saved! New PINs active from next login.');
 }
 
-// ==================== MODAL ====================
+// ==================== MODAL LAYER ====================
 function showModal(html, extraClass=''){
   document.getElementById('modal-container').innerHTML=`
   <div class="modal-overlay" onclick="closeModalOverlay(event)">
     <div class="modal ${extraClass} fade-in">${html}</div>
   </div>`;
 }
-function closeModal(){document.getElementById('modal-container').innerHTML='';}
+function closeModal(){
+  document.getElementById('modal-container').innerHTML='';
+  ss(KEYS.LAST_MODAL, { active: false, type: '', id: null });
+}
 function closeModalOverlay(e){if(e.target.classList.contains('modal-overlay'))closeModal();}
 
 // ==================== INIT ====================
 initDB();
-// Auto-login if session exists
 const savedUser=ls(KEYS.USER);
 if(savedUser){
   currentUser=savedUser;
