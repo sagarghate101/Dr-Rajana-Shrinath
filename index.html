@@ -300,6 +300,46 @@ function getPrimaryKey(storeKey){
   return'id';
 }
 
+function normalizeRecord(record, type) {
+  if(!record) return record;
+  // Normalize Google Sheets capitalized keys to lowercase app keys
+  const r = {...record};
+  if(type === 'patients') {
+    if(r.Name && !r.name) r.name = r.Name;
+    if(r.Mobile && !r.mobile) r.mobile = r.Mobile;
+    if(r.Age && !r.age) r.age = r.Age;
+    if(r.Gender && !r.gender) r.gender = r.Gender;
+    if(r.Address && !r.address) r.address = r.Address;
+    if(r.Occupation && !r.occupation) r.occupation = r.Occupation;
+    if(r.BloodGroup && !r.bloodGroup) r.bloodGroup = r.BloodGroup;
+    if(r.CreatedAt && !r.createdAt) r.createdAt = r.CreatedAt;
+  }
+  if(type === 'couriers') {
+    if(r.PatientName && !r.patientName) r.patientName = r.PatientName;
+    if(r.Mobile && !r.mobile) r.mobile = r.Mobile;
+    if(r.Address && !r.address) r.address = r.Address;
+    if(r.Status && !r.status) r.status = r.Status;
+    if(r.Carrier && !r.carrier) r.carrier = r.Carrier;
+    if(r.Tracking && !r.tracking) r.tracking = r.Tracking;
+    if(r.CreatedAt && !r.createdAt) r.createdAt = r.CreatedAt;
+  }
+  if(type === 'billing') {
+    if(r.PatientName && !r.patientName) r.patientName = r.PatientName;
+    if(r.Date && !r.date) r.date = r.Date;
+    if(r.Total && !r.total) r.total = parseFloat(r.Total)||0;
+    if(r.PaymentStatus && !r.paymentStatus) r.paymentStatus = r.PaymentStatus;
+  }
+  if(type === 'medicines') {
+    if(r.Name && !r.name) r.name = r.Name;
+    if(r.Potency && !r.potency) r.potency = r.Potency;
+    if(r.Category && !r.category) r.category = r.Category;
+    if(r.Stock !== undefined && r.stock === undefined) r.stock = parseInt(r.Stock)||0;
+    if(r.MinStock !== undefined && r.minStock === undefined) r.minStock = parseInt(r.MinStock)||0;
+    if(r.Price !== undefined && r.price === undefined) r.price = parseFloat(r.Price)||0;
+  }
+  return r;
+}
+
 function mergeData(localArr,remoteArr,pk){
   const map=new Map();
   remoteArr.forEach(item=>{if(item&&item[pk])map.set(item[pk],item);});
@@ -344,12 +384,12 @@ async function loadFromSheets(){
     const res=await fetch(WEB_APP_URL+'?action=get_data');
     const remote=await res.json();
     if(remote&&remote.success!==false){
-      if(remote.patients)saveAll(KEYS.PATIENTS,mergeData(getAll(KEYS.PATIENTS),remote.patients,'PatientID'));
+      if(remote.patients)saveAll(KEYS.PATIENTS,mergeData(getAll(KEYS.PATIENTS),remote.patients.map(r=>normalizeRecord(r,'patients')),'PatientID'));
       if(remote.cases)saveAll(KEYS.CASES,mergeData(getAll(KEYS.CASES),remote.cases,'CaseID'));
-      if(remote.couriers)saveAll(KEYS.COURIERS,mergeData(getAll(KEYS.COURIERS),remote.couriers,'CourierID'));
-      if(remote.billing)saveAll(KEYS.BILLING,mergeData(getAll(KEYS.BILLING),remote.billing,'InvoiceID'));
+      if(remote.couriers)saveAll(KEYS.COURIERS,mergeData(getAll(KEYS.COURIERS),remote.couriers.map(r=>normalizeRecord(r,'couriers')),'CourierID'));
+      if(remote.billing)saveAll(KEYS.BILLING,mergeData(getAll(KEYS.BILLING),remote.billing.map(r=>normalizeRecord(r,'billing')),'InvoiceID'));
       if(remote.appointments)saveAll(KEYS.APPOINTMENTS,mergeData(getAll(KEYS.APPOINTMENTS),remote.appointments,'AppointmentID'));
-      if(remote.medicines&&remote.medicines.length>0)saveAll(KEYS.MEDICINES,mergeData(getAll(KEYS.MEDICINES),remote.medicines,'MedicineID'));
+      if(remote.medicines&&remote.medicines.length>0)saveAll(KEYS.MEDICINES,mergeData(getAll(KEYS.MEDICINES),remote.medicines.map(r=>normalizeRecord(r,'medicines')),'MedicineID'));
       let sm=ls('sync_meta')||{};
       sm.lastSync=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
       ss('sync_meta',sm);
@@ -540,7 +580,7 @@ function fmt(n){return'₹'+(n||0).toLocaleString('en-IN');}
 function today(){return new Date().toISOString().split('T')[0];}
 function fmtDate(d){if(!d)return'-';const dt=new Date(d);return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}
 function genId(prefix,list){return`${prefix}-${(list.length+1).toString().padStart(4,'0')}`;}
-function patientInitials(name){return name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);}
+function patientInitials(name){if(!name)return'??';return name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,2)||'??';}
 
 // ==================== DASHBOARD ====================
 function renderDashboard(){
@@ -689,7 +729,7 @@ function renderPatients(){
 function filterPatients(){
   const q=document.getElementById('patient-search').value.toLowerCase();
   const all=getAll(KEYS.PATIENTS);
-  const filtered=all.filter(p=>p.name.toLowerCase().includes(q)||p.mobile.includes(q)||p.PatientID.toLowerCase().includes(q));
+  const filtered=all.filter(p=>{const n=(p.name||p.Name||'').toLowerCase();const m=(p.mobile||p.Mobile||'');const id=(p.PatientID||'').toLowerCase();return n.includes(q)||m.includes(q)||id.includes(q);});
   renderPatientList(filtered);
 }
 
@@ -700,18 +740,18 @@ function renderPatientList(patients){
     el.innerHTML=`<div class="card"><div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">No patients found</div><div class="empty-sub">Register your first patient to get started</div></div></div>`;
     return;
   }
-  el.innerHTML=patients.map(p=>`
-  <div class="patient-row" onclick="showPatientDetail('${p.PatientID}')">
-    <div class="patient-avatar">${patientInitials(p.name)}</div>
+  el.innerHTML=patients.map(p=>{const nm=p.name||p.Name||'Unknown';const mb=p.mobile||p.Mobile||'';const ag=p.age||p.Age||'';const gn=p.gender||p.Gender||'';const pid=p.PatientID||p.id||'';return`
+  <div class="patient-row" onclick="showPatientDetail('${pid}')">
+    <div class="patient-avatar">${patientInitials(nm)}</div>
     <div style="flex:1;">
-      <div class="patient-name">${p.name}</div>
-      <div class="patient-meta">${p.mobile} · ${p.age}y · ${p.gender} · <span style="font-family:monospace;font-size:10px;">${p.PatientID}</span></div>
+      <div class="patient-name">${nm}</div>
+      <div class="patient-meta">${mb} · ${ag}y · ${gn} · <span style="font-family:monospace;font-size:10px;">${pid}</span></div>
     </div>
     <div style="display:flex;gap:6px;align-items:center;">
       ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startConsult('${p.PatientID}')">🩺 Consult</button>`:''}
       <span style="color:var(--slate-300);font-size:18px;">›</span>
     </div>
-  </div>`).join('');
+  </div>`;}).join('');
 }
 
 function showAddPatient(){
@@ -782,32 +822,40 @@ async function savePatient(){
 
 function showPatientDetail(pid){
   const patients=getAll(KEYS.PATIENTS);
-  const p=patients.find(pt=>pt.PatientID===pid);
+  const p=patients.find(pt=>(pt.PatientID||pt.id)===pid);
   if(!p)return;
+  // Normalize fields
+  const pName=p.name||p.Name||'Unknown';
+  const pMobile=p.mobile||p.Mobile||'';
+  const pAge=p.age||p.Age||'';
+  const pGender=p.gender||p.Gender||'';
+  const pBlood=p.bloodGroup||p.BloodGroup||'Unknown';
+  const pAddress=p.address||p.Address||'';
+  const pPID=p.PatientID||p.id||'';
   const cases=getAll(KEYS.CASES).filter(c=>c.patientId===pid).sort((a,b)=>b.date.localeCompare(a.date));
   showModal(`
   <div class="modal-header">
     <div style="display:flex;align-items:center;gap:12px;">
-      <div class="patient-avatar" style="width:48px;height:48px;font-size:16px;">${patientInitials(p.name)}</div>
+      <div class="patient-avatar" style="width:48px;height:48px;font-size:16px;">${patientInitials(pName)}</div>
       <div>
-        <div class="modal-title">${p.name}</div>
-        <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${p.PatientID}</div>
+        <div class="modal-title">${pName}</div>
+        <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${pPID}</div>
       </div>
     </div>
     <button class="close-btn" onclick="closeModal()">✕</button>
   </div>
 
   <div class="grid-3" style="margin-bottom:16px;">
-    <div class="card-sm"><div class="label">Mobile</div><div style="font-weight:700;">${p.mobile}</div></div>
-    <div class="card-sm"><div class="label">Age / Gender</div><div style="font-weight:700;">${p.age}y · ${p.gender}</div></div>
-    <div class="card-sm"><div class="label">Blood Group</div><div style="font-weight:700;">${p.bloodGroup||'Unknown'}</div></div>
+    <div class="card-sm"><div class="label">Mobile</div><div style="font-weight:700;">${pMobile}</div></div>
+    <div class="card-sm"><div class="label">Age / Gender</div><div style="font-weight:700;">${pAge}y · ${pGender}</div></div>
+    <div class="card-sm"><div class="label">Blood Group</div><div style="font-weight:700;">${pBlood}</div></div>
   </div>
-  ${p.address?`<div class="card-sm" style="margin-bottom:12px;"><div class="label">Address</div><div style="font-size:12px;color:var(--slate-600);">${p.address}</div></div>`:''}
+  ${pAddress?`<div class="card-sm" style="margin-bottom:12px;"><div class="label">Address</div><div style="font-size:12px;color:var(--slate-600);">${pAddress}</div></div>`:''}
 
   <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-    ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="closeModal();startConsult('${p.PatientID}')">🩺 New Consultation</button>`:''}
-    <button class="btn btn-secondary btn-sm" onclick="showEditPatient('${p.PatientID}')">✏️ Edit</button>
-    <button class="btn btn-secondary btn-sm" onclick="showMedHistory('${p.PatientID}')">📋 Medical History</button>
+    ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="closeModal();startConsult('${pPID}')">🩺 New Consultation</button>`:''}
+    <button class="btn btn-secondary btn-sm" onclick="showEditPatient('${pPID}')">✏️ Edit</button>
+    <button class="btn btn-secondary btn-sm" onclick="showMedHistory('${pPID}')">📋 Medical History</button>
   </div>
 
   <div style="font-size:13px;font-weight:800;color:var(--slate-700);margin-bottom:10px;">Visit History (${cases.length})</div>
