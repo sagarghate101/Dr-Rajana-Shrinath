@@ -79,6 +79,7 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;-webkit-overflow-scrolling:t
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
 .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+.grid-5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;}
 .form-group{margin-bottom:14px;}
 .divider{height:1px;background:var(--slate-100);margin:16px 0;}
 .empty-state{text-align:center;padding:48px 20px;}
@@ -149,7 +150,7 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;-webkit-overflow-scrolling:t
   #main-area{margin-left:0;}
   .hamburger{display:flex;align-items:center;}
   .topbar-clinic{display:block;}
-  .grid-2,.grid-3,.grid-4{grid-template-columns:1fr;}
+  .grid-2,.grid-3,.grid-4,.grid-5{grid-template-columns:1fr;}
   #mobile-overlay.show{display:block;}
   #content{padding:14px;}
 }
@@ -261,7 +262,8 @@ const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxsVI5Iz02B4I9pPh4l
 const KEYS={
   PATIENTS:'hom_patients',CASES:'hom_cases',COURIERS:'hom_couriers',
   BILLING:'hom_billing',APPOINTMENTS:'hom_appointments',MEDICINES:'hom_medicines',
-  USER:'hom_user',SYNC:'hom_sync',SETTINGS:'hom_settings',PRESCRIPTIONS:'hom_prescriptions'
+  USER:'hom_user',SYNC:'hom_sync',SETTINGS:'hom_settings',PRESCRIPTIONS:'hom_prescriptions',
+  QUEUE:'hom_queue'
 };
 
 function ls(key){try{return JSON.parse(localStorage.getItem(key)||'null');}catch{return null;}}
@@ -278,6 +280,7 @@ function initDB(){
   if(!ls(KEYS.BILLING)) ss(KEYS.BILLING,[]);
   if(!ls(KEYS.APPOINTMENTS)) ss(KEYS.APPOINTMENTS,[]);
   if(!ls(KEYS.PRESCRIPTIONS)) ss(KEYS.PRESCRIPTIONS,[]);
+  if(!ls(KEYS.QUEUE)) ss(KEYS.QUEUE,[]);
   if(!ls(KEYS.SYNC)) ss(KEYS.SYNC,{url:WEB_APP_URL,enabled:true});
   if(!ls(KEYS.SETTINGS)) ss(KEYS.SETTINGS,{clinicName:"Dr. Sharma's Homeopathy Clinic",doctorName:"Dr. Anjali Sharma",doctorPin:"1234",receptionistName:"Neha Deshmukh",receptionistPin:"4321"});
 }
@@ -469,6 +472,26 @@ async function loadFromGoogleSheets() {
         saveAll(KEYS.APPOINTMENTS, mappedAppointments);
       }
 
+      // Decode Queue
+      if (Array.isArray(data.queue)) {
+        const mappedQueue = data.queue.map(q => ({
+          id: q.QueueID || q.id || '',
+          token: parseInt(q.Token || q.token) || 0,
+          patientId: q.PatientID || q.patientId || '',
+          patientName: q.PatientName || q.patientName || '',
+          mobile: String(q.Mobile || q.mobile || ''),
+          date: q.Date || q.date || '',
+          addedTime: q.AddedTime || q.addedTime || '',
+          type: q.Type || q.type || '',
+          status: q.Status || q.status || '',
+          appointmentId: q.AppointmentID || q.appointmentId || '',
+          isAppointment: (q.IsAppointment || q.isAppointment) === 'YES' || 
+                         (q.IsAppointment || q.isAppointment) === true,
+          updatedAt: q.updatedAt || Date.now()
+        }));
+        saveAll(KEYS.QUEUE, mappedQueue);
+      }
+
       // Decode Medicines
       if (Array.isArray(data.medicines)) {
         const mappedMedicines = data.medicines.map(m => ({
@@ -645,12 +668,29 @@ async function syncToGoogleSheets() {
         updatedAt: m.updatedAt || Date.now()
       }));
 
+      const remoteQueueMapped = (remoteData.queue || []).map(q => ({
+        id: q.QueueID || q.id || '',
+        token: parseInt(q.Token || q.token) || 0,
+        patientId: q.PatientID || q.patientId || '',
+        patientName: q.PatientName || q.patientName || '',
+        mobile: String(q.Mobile || q.mobile || ''),
+        date: q.Date || q.date || '',
+        addedTime: q.AddedTime || q.addedTime || '',
+        type: q.Type || q.type || '',
+        status: q.Status || q.status || '',
+        appointmentId: q.AppointmentID || q.appointmentId || '',
+        isAppointment: (q.IsAppointment || q.isAppointment) === 'YES' || 
+                       (q.IsAppointment || q.isAppointment) === true,
+        updatedAt: q.updatedAt || Date.now()
+      }));
+
       const mergedPatients = mergeLists(getAll(KEYS.PATIENTS), remotePatientsMapped);
       const mergedCases = mergeLists(getAll(KEYS.CASES), remoteCasesMapped);
       const mergedCouriers = mergeLists(getAll(KEYS.COURIERS), remoteCouriersMapped);
       const mergedBilling = mergeLists(getAll(KEYS.BILLING), remoteBillingMapped);
       const mergedAppointments = mergeLists(getAll(KEYS.APPOINTMENTS), remoteAppointmentsMapped);
       const mergedMedicines = mergeLists(getAll(KEYS.MEDICINES), remoteMedicinesMapped);
+      const mergedQueue = mergeLists(getAll(KEYS.QUEUE), remoteQueueMapped);
 
       saveAll(KEYS.PATIENTS, mergedPatients);
       saveAll(KEYS.CASES, mergedCases);
@@ -658,6 +698,7 @@ async function syncToGoogleSheets() {
       saveAll(KEYS.BILLING, mergedBilling);
       saveAll(KEYS.APPOINTMENTS, mergedAppointments);
       saveAll(KEYS.MEDICINES, mergedMedicines);
+      saveAll(KEYS.QUEUE, mergedQueue);
     }
 
     // 2. Prepare payload (always in camelCase, matching Apps Script expectations)
@@ -668,7 +709,8 @@ async function syncToGoogleSheets() {
       couriers: getAll(KEYS.COURIERS),
       billing: getAll(KEYS.BILLING),
       appointments: getAll(KEYS.APPOINTMENTS),
-      medicines: getAll(KEYS.MEDICINES)
+      medicines: getAll(KEYS.MEDICINES),
+      queue: getAll(KEYS.QUEUE)
     };
 
     // 3. Upload merged data
@@ -762,6 +804,7 @@ function doLogout(){
 // ==================== NAVIGATION ====================
 const NAV_ITEMS=[
   {id:'dashboard',label:'Dashboard',icon:'📊',roles:['doctor','receptionist']},
+  {id:'queue',label:'Today Queue',icon:'🎫',roles:['doctor','receptionist']},
   {id:'patients',label:'Patients',icon:'👥',roles:['doctor','receptionist']},
   {id:'consult',label:'Case / Consult',icon:'🩺',roles:['doctor']},
   {id:'courier',label:'Courier',icon:'📦',roles:['doctor','receptionist']},
@@ -836,6 +879,7 @@ function renderView(){
   c.className='fade-in';
   switch(activeTab){
     case 'dashboard': renderDashboard(); break;
+    case 'queue': renderQueue(); break;
     case 'patients': renderPatients(); break;
     case 'consult': renderConsult(); break;
     case 'courier': renderCourier(); break;
@@ -879,7 +923,7 @@ function renderDashboard(){
     <div class="section-sub">${fmtDate(today())} — Here's your clinic overview</div>
   </div>
 
-  <div class="grid-4" style="margin-bottom:20px;">
+  <div class="grid-5" style="margin-bottom:20px;">
     <div class="stat-card" style="cursor:pointer;" onclick="navigate('patients')">
       <div class="stat-icon">👥</div>
       <div class="stat-value">${patients.length}</div>
@@ -889,6 +933,11 @@ function renderDashboard(){
       <div class="stat-icon">🩺</div>
       <div class="stat-value">${todayCases}</div>
       <div class="stat-label">Today's Visits</div>
+    </div>
+    <div class="stat-card" style="cursor:pointer;" onclick="navigate('queue')">
+      <div class="stat-icon">🎫</div>
+      <div class="stat-value" style="color:var(--amber-600);">${getAll(KEYS.QUEUE).filter(q=>q.date===today()&&q.status==='Waiting').length}</div>
+      <div class="stat-label">Waiting in Queue</div>
     </div>
     <div class="stat-card" style="cursor:pointer;" onclick="navigate('courier')">
       <div class="stat-icon">📦</div>
@@ -969,6 +1018,256 @@ function renderDashboard(){
     </div>
   </div>`:''}
   `;
+}
+
+// ==================== QUEUE / TOKEN SYSTEM ====================
+function renderQueue() {
+  // Today's appointments auto-add to queue if not already added
+  const todayAppts = getAll(KEYS.APPOINTMENTS)
+    .filter(a => a.date === today() && a.status === 'Scheduled');
+  
+  const existingQueue = getAll(KEYS.QUEUE);
+  
+  todayAppts.forEach(appt => {
+    const alreadyInQueue = existingQueue
+      .some(q => q.appointmentId === appt.id && q.date === today());
+    
+    if (!alreadyInQueue) {
+      // Find patient by mobile
+      const patient = getAll(KEYS.PATIENTS)
+        .find(p => p.mobile === appt.mobile || p.name === appt.patientName);
+      
+      const currentQueue = getAll(KEYS.QUEUE)
+        .filter(q => q.date === today());
+      const nextToken = currentQueue.length > 0 
+        ? Math.max(...currentQueue.map(q => q.token)) + 1 
+        : 1;
+      
+      const allQueue = getAll(KEYS.QUEUE);
+      allQueue.push({
+        id: 'Q-APT-' + appt.id,
+        token: nextToken,
+        patientId: patient ? patient.id : '',
+        patientName: appt.patientName,
+        mobile: appt.mobile,
+        date: today(),
+        addedTime: appt.time || '—',
+        type: appt.type || 'Appointment',
+        status: 'Waiting',
+        appointmentId: appt.id,
+        isAppointment: true
+      });
+      saveAll(KEYS.QUEUE, allQueue);
+    }
+  });
+
+  const patients = getAll(KEYS.PATIENTS);
+  const queue = getAll(KEYS.QUEUE).filter(q => q.date === today());
+  const waiting = queue.filter(q => q.status === 'Waiting').length;
+  const inConsult = queue.filter(q => q.status === 'In-Consultation').length;
+  const done = queue.filter(q => q.status === 'Done').length;
+
+  document.getElementById('content').innerHTML = `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+    <div>
+      <div class="section-title">🎫 Today's Queue</div>
+      <div class="section-sub">${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'})}</div>
+    </div>
+    <button class="btn btn-primary" onclick="showAddToQueue()">➕ Add Patient to Queue</button>
+  </div>
+
+  <div class="grid-3" style="margin-bottom:20px;">
+    <div class="stat-card" style="border-left:4px solid var(--amber-600);">
+      <div class="stat-icon">⏳</div>
+      <div class="stat-value" style="color:var(--amber-600);">${waiting}</div>
+      <div class="stat-label">Waiting</div>
+    </div>
+    <div class="stat-card" style="border-left:4px solid var(--teal-600);">
+      <div class="stat-icon">🩺</div>
+      <div class="stat-value" style="color:var(--teal-600);">${inConsult}</div>
+      <div class="stat-label">In Consultation</div>
+    </div>
+    <div class="stat-card" style="border-left:4px solid var(--emerald-600);">
+      <div class="stat-icon">✅</div>
+      <div class="stat-value" style="color:var(--emerald-600);">${done}</div>
+      <div class="stat-label">Done Today</div>
+    </div>
+  </div>
+
+  <div id="queue-list"></div>`;
+
+  renderQueueList(queue);
+}
+
+function renderQueueList(queue) {
+  const el = document.getElementById('queue-list');
+  if (!el) return;
+  if (queue.length === 0) {
+    el.innerHTML = `<div class="card"><div class="empty-state">
+      <div class="empty-icon">🎫</div>
+      <div class="empty-title">No patients in queue today</div>
+      <div class="empty-sub">Receptionist can add patients to today's queue</div>
+    </div></div>`;
+    return;
+  }
+
+  el.innerHTML = queue
+    .sort((a,b) => a.token - b.token)
+    .map(q => `
+    <div class="card" style="margin-bottom:10px;border-left:4px solid ${q.status==='Waiting'?'var(--amber-600)':q.status==='In-Consultation'?'var(--teal-600)':'var(--emerald-600)'};">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="width:48px;height:48px;border-radius:12px;background:${q.status==='Waiting'?'var(--amber-50)':q.status==='In-Consultation'?'var(--teal-50)':'var(--emerald-50)'};display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:${q.status==='Waiting'?'var(--amber-700)':q.status==='In-Consultation'?'var(--teal-700)':'var(--emerald-700)'};flex-shrink:0;">
+          ${q.token}
+        </div>
+        <div style="flex:1;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="font-size:14px;font-weight:800;color:var(--slate-800);">${escapeHtml(q.patientName)}</div>
+            ${q.isAppointment ? 
+              '<span class="badge badge-indigo" style="font-size:9px;">📅 Appointment</span>' 
+              : '<span class="badge badge-slate" style="font-size:9px;">🚶 Walk-in</span>'}
+          </div>
+          <div style="font-size:11px;color:var(--slate-400);">${escapeHtml(q.mobile)} · Added ${escapeHtml(q.addedTime)}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+          <span class="badge ${q.status==='Waiting'?'badge-amber':q.status==='In-Consultation'?'badge-teal':'badge-emerald'}">${q.status}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+        ${q.status==='Waiting' && currentUser.role==='doctor' ? `
+          <button class="btn btn-primary btn-sm" onclick="startQueueConsult('${q.id}','${q.patientId}')">🩺 Start Consult</button>` : ''}
+        ${q.status==='In-Consultation' && currentUser.role==='doctor' ? `
+          <button class="btn btn-secondary btn-sm" onclick="markQueueDone('${q.id}')">✅ Mark Done</button>` : ''}
+        ${q.status==='Waiting' ? `
+          <button class="btn btn-danger btn-sm" onclick="removeFromQueue('${q.id}')">✕ Remove</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function showAddToQueue() {
+  const patients = getAll(KEYS.PATIENTS);
+  const queue = getAll(KEYS.QUEUE).filter(q => q.date === today());
+  const nextToken = queue.length > 0 ? Math.max(...queue.map(q => q.token)) + 1 : 1;
+
+  showModal(`
+  <div class="modal-header">
+    <div class="modal-title">➕ Add to Today's Queue</div>
+    <button class="close-btn" onclick="closeModal()">✕</button>
+  </div>
+  <div style="background:var(--teal-50);border:1px solid var(--teal-100);border-radius:10px;padding:12px;margin-bottom:16px;text-align:center;">
+    <div style="font-size:11px;font-weight:700;color:var(--teal-600);">NEXT TOKEN NUMBER</div>
+    <div style="font-size:36px;font-weight:900;color:var(--teal-700);">${nextToken}</div>
+  </div>
+  <div class="form-group">
+    <label class="label">Select Patient *</label>
+    <input class="input" id="q-search" placeholder="Search by name or mobile..." 
+      oninput="searchQueuePatient()" autocomplete="off"/>
+    <div id="q-suggestions"></div>
+    <input type="hidden" id="q-pid"/>
+    <input type="hidden" id="q-pname"/>
+    <input type="hidden" id="q-pmobile"/>
+    <div id="q-selected" class="hidden" style="margin-top:8px;padding:10px;background:var(--teal-50);border:1px solid var(--teal-100);border-radius:10px;font-size:12px;font-weight:700;color:var(--teal-700);"></div>
+  </div>
+  <div class="form-group">
+    <label class="label">Visit Type</label>
+    <select class="input" id="q-type">
+      <option>Consultation</option>
+      <option>Follow-up</option>
+    </select>
+  </div>
+  <div id="q-err" class="alert alert-error hidden" style="margin-bottom:12px;">Please select a patient.</div>
+  <div style="display:flex;gap:10px;">
+    <button class="btn btn-secondary" style="flex:1;" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" style="flex:2;" onclick="saveToQueue(${nextToken})">🎫 Add Token ${nextToken}</button>
+  </div>`);
+}
+
+function searchQueuePatient() {
+  const q = document.getElementById('q-search').value.toLowerCase();
+  const patients = getAll(KEYS.PATIENTS);
+  const matches = patients.filter(p => 
+    p.name.toLowerCase().includes(q) || p.mobile.includes(q)
+  ).slice(0, 5);
+  const box = document.getElementById('q-suggestions');
+  if (!q || matches.length === 0) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div style="position:relative;">
+    <div style="position:absolute;top:4px;left:0;right:0;background:#fff;border:1px solid var(--slate-200);border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.1);z-index:50;overflow:hidden;">
+      ${matches.map(p => `
+        <div style="padding:10px 14px;cursor:pointer;font-size:12px;font-weight:600;border-bottom:1px solid var(--slate-100);" 
+          onmouseover="this.style.background='var(--teal-50)'" 
+          onmouseout="this.style.background=''"
+          onclick="selectQueuePatient('${p.id}','${escapeHtml(p.name)}','${escapeHtml(p.mobile)}')">
+          <strong>${escapeHtml(p.name)}</strong> 
+          <span style="color:var(--slate-400);">${escapeHtml(p.mobile)} · ${escapeHtml(p.id)}</span>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function selectQueuePatient(id, name, mobile) {
+  document.getElementById('q-pid').value = id;
+  document.getElementById('q-pname').value = name;
+  document.getElementById('q-pmobile').value = mobile;
+  document.getElementById('q-search').value = name + ' (' + mobile + ')';
+  document.getElementById('q-suggestions').innerHTML = '';
+  document.getElementById('q-selected').textContent = '✅ ' + name + ' · ' + id + ' · ' + mobile;
+  document.getElementById('q-selected').classList.remove('hidden');
+  document.getElementById('q-err').classList.add('hidden');
+}
+
+async function saveToQueue(token) {
+  const pid = document.getElementById('q-pid').value;
+  const pname = document.getElementById('q-pname').value;
+  const pmobile = document.getElementById('q-pmobile').value;
+  if (!pid) { 
+    document.getElementById('q-err').classList.remove('hidden'); 
+    return; 
+  }
+  const queue = getAll(KEYS.QUEUE);
+  queue.push({
+    id: 'Q-' + Date.now(),
+    token: token,
+    patientId: pid,
+    patientName: pname,
+    mobile: pmobile,
+    date: today(),
+    addedTime: new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'}),
+    type: document.getElementById('q-type').value,
+    status: 'Waiting'
+  });
+  saveAll(KEYS.QUEUE, queue);
+  closeModal();
+  renderQueue();
+  await syncToGoogleSheets();
+}
+
+async function startQueueConsult(qid, pid) {
+  const queue = getAll(KEYS.QUEUE);
+  const idx = queue.findIndex(q => q.id === qid);
+  if (idx !== -1) {
+    queue[idx].status = 'In-Consultation';
+    saveAll(KEYS.QUEUE, queue);
+  }
+  startConsult(pid);
+  await syncToGoogleSheets();
+}
+
+async function markQueueDone(qid) {
+  const queue = getAll(KEYS.QUEUE);
+  const idx = queue.findIndex(q => q.id === qid);
+  if (idx !== -1) {
+    queue[idx].status = 'Done';
+    saveAll(KEYS.QUEUE, queue);
+  }
+  renderQueue();
+  await syncToGoogleSheets();
+}
+
+async function removeFromQueue(qid) {
+  if (!confirm('Remove this patient from queue?')) return;
+  const queue = getAll(KEYS.QUEUE).filter(q => q.id !== qid);
+  saveAll(KEYS.QUEUE, queue);
+  renderQueue();
+  await syncToGoogleSheets();
 }
 
 function getGreeting(){
