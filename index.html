@@ -1265,8 +1265,9 @@ function startConsult(pid){
 let rxList=[];
 
 function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  if (str === null || str === undefined) return '';
+  const s = String(str);
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
 function calculateFollowUpDate() {
@@ -1456,11 +1457,14 @@ function renderPreviousCaseHistory(pid) {
     return;
   }
 
-  const cases = getAll(KEYS.CASES)
+  const allCases = getAll(KEYS.CASES);
+  console.log('All cases:', allCases.length, 'Looking for pid:', pid);
+  console.log('Matching:', allCases.filter(c => c.patientId === pid).length);
+  const cases = allCases
     .filter(c => c.patientId === pid)
     .sort((a, b) => {
-      const tA = a.updatedAt || new Date(a.visitDate || a.date).getTime() || 0;
-      const tB = b.updatedAt || new Date(b.visitDate || b.date).getTime() || 0;
+      const tA = a.updatedAt || new Date(a.visitDate || a.date || 0).getTime();
+      const tB = b.updatedAt || new Date(b.visitDate || b.date || 0).getTime();
       return tB - tA;
     });
 
@@ -1477,7 +1481,7 @@ function renderPreviousCaseHistory(pid) {
   container.classList.remove('hidden');
   listEl.innerHTML = cases.map(c => {
     const medicinesList = (c.prescriptions || []).map(rx => `<span class="rx-chip" style="display:inline-block;background:var(--slate-100);color:var(--slate-700);padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;margin-right:4px;margin-bottom:4px;">💊 ${escapeHtml(rx.name)} ${escapeHtml(rx.potency)}</span>`).join('');
-    const visitDateStr = fmtDate(c.visitDate || c.date);
+    const visitDateStr = fmtDate(c.visitDate || c.date || '');
     const nextVisitStr = c.followUpDate ? fmtDate(c.followUpDate) : '-';
     const followUpDaysStr = c.followUpDays ? `${c.followUpDays} Days` : '-';
 
