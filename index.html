@@ -25,7 +25,7 @@ input,select,textarea{font-family:inherit;}
 
 /* LAYOUT */
 #app{display:flex;min-height:100vh;}
-#sidebar{width:256px;background:var(--slate-900);color:var(--slate-300);display:flex;flex-direction:column;flex-shrink:0;position:fixed;top:0;left:0;height:100vh;z-index:100;transition:transform .3s;}
+#sidebar{width:256px;background:var(--slate-900);color:var(--slate-300);display:flex;flex-direction:column;flex-shrink:0;position:fixed;top:0;left:0;height:100vh;z-index:100;transition:transform .3s;-webkit-overflow-scrolling:touch;}
 #main-area{flex:1;margin-left:256px;display:flex;flex-direction:column;min-height:100vh;}
 #topbar{background:#fff;border-bottom:1px solid var(--slate-200);height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:50;}
 #content{flex:1;padding:24px;max-width:1200px;width:100%;margin:0 auto;}
@@ -33,7 +33,7 @@ input,select,textarea{font-family:inherit;}
 .brand-icon{width:40px;height:40px;background:rgba(20,184,166,.1);border:1px solid rgba(20,184,166,.2);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;}
 .brand-name{font-size:13px;font-weight:900;color:#fff;letter-spacing:.5px;}
 .brand-sub{font-size:10px;color:var(--teal-400);font-weight:700;letter-spacing:1px;text-transform:uppercase;}
-nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
+nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 .nav-btn{width:100%;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:12px;font-size:12px;font-weight:700;border:none;background:none;color:var(--slate-400);transition:all .2s;text-align:left;margin-bottom:2px;}
 .nav-btn:hover{background:rgba(30,41,59,.5);color:var(--slate-200);}
 .nav-btn.active{background:var(--teal-600);color:#fff;box-shadow:0 4px 12px rgba(13,148,136,.25);}
@@ -98,7 +98,7 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
 .patient-name{font-size:13px;font-weight:800;color:var(--slate-800);}
 .patient-meta{font-size:11px;color:var(--slate-400);font-weight:500;}
 .modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;}
-.modal{background:#fff;border-radius:20px;width:100%;max-width:640px;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.2);}
+.modal{background:#fff;border-radius:20px;width:100%;max-width:640px;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.2);-webkit-overflow-scrolling:touch;}
 .modal-lg{max-width:820px;}
 .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--slate-100);}
 .modal-title{font-size:16px;font-weight:900;color:var(--slate-800);}
@@ -160,12 +160,22 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
 .fade-in{animation:fadeIn .25s ease;}
 @keyframes ping{75%,100%{transform:scale(2);opacity:0;}}
 .ping{animation:ping 1.2s cubic-bezier(0,0,.2,1) infinite;}
+@keyframes spin { 100% { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 
+<!-- LOADING SPLASH SCREEN -->
+<div id="loading-screen" style="position:fixed;inset:0;background:var(--slate-50);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;">
+  <div class="login-box" style="text-align:center;border:none;box-shadow:none;background:transparent;">
+    <div class="login-icon" style="animation: spin 1s linear infinite;background:none;border:none;font-size:40px;margin-bottom:16px;">🔄</div>
+    <div class="login-title" style="font-size:18px;">Connecting to Clinic Cloud...</div>
+    <div class="login-sub" style="margin-top:8px;">Synchronizing medical records...</div>
+  </div>
+</div>
+
 <!-- LOGIN SCREEN -->
-<div id="login-screen">
+<div id="login-screen" class="hidden">
   <div class="login-box">
     <div class="login-brand">
       <div class="login-icon">🏥</div>
@@ -231,6 +241,8 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
         <span class="topbar-clinic">🏥 Clinic</span>
       </div>
       <div class="topbar-right">
+        <button class="btn btn-secondary btn-sm" id="sync-now-btn" onclick="manualSyncNow()" style="font-size:11px;padding:5px 10px;height:32px;display:inline-flex;align-items:center;gap:4px;">🔄 Sync Now</button>
+        <span class="badge badge-rose hidden" id="offline-badge" style="height:32px;display:inline-flex;align-items:center;">Offline Mode</span>
         <span class="sync-badge" id="sync-badge" style="display:none"></span>
         <div class="role-badge" id="tb-role-badge">Dr</div>
       </div>
@@ -243,12 +255,13 @@ nav#sidebar-nav{flex:1;padding:16px;overflow-y:auto;}
 <div id="modal-container"></div>
 
 <script>
-// ==================== DATA LAYER ====================
+// ==================== CONFIG & SYNC CONFIG ====================
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxsVI5Iz02B4I9pPh4laVolbiq-4dTe5CBbz7IythIyifkdeYEYfBGmwXxhO-J_R_DK/exec";
+
 const KEYS={
   PATIENTS:'hom_patients',CASES:'hom_cases',COURIERS:'hom_couriers',
   BILLING:'hom_billing',APPOINTMENTS:'hom_appointments',MEDICINES:'hom_medicines',
-  USER:'hom_user',SYNC:'hom_sync',SETTINGS:'hom_settings',
-  OFFLINE_QUEUE:'hom_offline_queue'
+  USER:'hom_user',SYNC:'hom_sync',SETTINGS:'hom_settings',PRESCRIPTIONS:'hom_prescriptions'
 };
 
 function ls(key){try{return JSON.parse(localStorage.getItem(key)||'null');}catch{return null;}}
@@ -264,171 +277,408 @@ function initDB(){
   if(!ls(KEYS.COURIERS)) ss(KEYS.COURIERS,[]);
   if(!ls(KEYS.BILLING)) ss(KEYS.BILLING,[]);
   if(!ls(KEYS.APPOINTMENTS)) ss(KEYS.APPOINTMENTS,[]);
-  if(!ls(KEYS.OFFLINE_QUEUE)) ss(KEYS.OFFLINE_QUEUE,[]);
+  if(!ls(KEYS.PRESCRIPTIONS)) ss(KEYS.PRESCRIPTIONS,[]);
+  if(!ls(KEYS.SYNC)) ss(KEYS.SYNC,{url:WEB_APP_URL,enabled:true});
   if(!ls(KEYS.SETTINGS)) ss(KEYS.SETTINGS,{clinicName:"Dr. Sharma's Homeopathy Clinic",doctorName:"Dr. Anjali Sharma",doctorPin:"1234",receptionistName:"Neha Deshmukh",receptionistPin:"4321"});
 }
 
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxsVI5Iz02B4I9pPh4laVolbiq-4dTe5CBbz7IythIyifkdeYEYfBGmwXxhO-J_R_DK/exec";
-
 const DEFAULT_MEDICINES=[
-  {MedicineID:'MED-001',name:'Arsenicum Album',potency:'30C',stock:15,minStock:5,category:'Dilution',price:150},
-  {MedicineID:'MED-002',name:'Nux Vomica',potency:'200C',stock:8,minStock:5,category:'Dilution',price:180},
-  {MedicineID:'MED-003',name:'Pulsatilla',potency:'30C',stock:12,minStock:4,category:'Dilution',price:150},
-  {MedicineID:'MED-004',name:'Sulphur',potency:'200C',stock:8,minStock:3,category:'Dilution',price:160},
-  {MedicineID:'MED-005',name:'Arnica Montana',potency:'Q',stock:20,minStock:6,category:'Mother Tincture',price:250},
-  {MedicineID:'MED-006',name:'Lycopodium',potency:'1M',stock:5,minStock:5,category:'Dilution',price:220},
-  {MedicineID:'MED-007',name:'Silicea',potency:'6X',stock:25,minStock:10,category:'Biochemic',price:120},
-  {MedicineID:'MED-008',name:'Belladonna',potency:'30C',stock:10,minStock:4,category:'Dilution',price:140},
-  {MedicineID:'MED-009',name:'Rhus Toxicodendron',potency:'200C',stock:7,minStock:3,category:'Dilution',price:170},
-  {MedicineID:'MED-010',name:'Calcarea Carb',potency:'200C',stock:6,minStock:3,category:'Dilution',price:180},
-  {MedicineID:'MED-011',name:'Natrum Mur',potency:'30C',stock:9,minStock:4,category:'Dilution',price:150},
-  {MedicineID:'MED-012',name:'Phosphorus',potency:'200C',stock:4,minStock:3,category:'Dilution',price:190},
-  {MedicineID:'MED-013',name:'Ignatia',potency:'200C',stock:6,minStock:3,category:'Dilution',price:160},
-  {MedicineID:'MED-014',name:'Sepia',potency:'200C',stock:5,minStock:3,category:'Dilution',price:170},
-  {MedicineID:'MED-015',name:'Thuja',potency:'1M',stock:3,minStock:2,category:'Dilution',price:210},
+  {id:'MED-001',name:'Arsenicum Album',potency:'30C',stock:15,minStock:5,category:'Dilution',price:150},
+  {id:'MED-002',name:'Nux Vomica',potency:'200C',stock:8,minStock:5,category:'Dilution',price:180},
+  {id:'MED-003',name:'Pulsatilla',potency:'30C',stock:12,minStock:4,category:'Dilution',price:150},
+  {id:'MED-004',name:'Sulphur',potency:'200C',stock:8,minStock:3,category:'Dilution',price:160},
+  {id:'MED-005',name:'Arnica Montana',potency:'Q',stock:20,minStock:6,category:'Mother Tincture',price:250},
+  {id:'MED-006',name:'Lycopodium',potency:'1M',stock:5,minStock:5,category:'Dilution',price:220},
+  {id:'MED-007',name:'Silicea',potency:'6X',stock:25,minStock:10,category:'Biochemic',price:120},
+  {id:'MED-008',name:'Belladonna',potency:'30C',stock:10,minStock:4,category:'Dilution',price:140},
+  {id:'MED-009',name:'Rhus Toxicodendron',potency:'200C',stock:7,minStock:3,category:'Dilution',price:170},
+  {id:'MED-010',name:'Calcarea Carb',potency:'200C',stock:6,minStock:3,category:'Dilution',price:180},
+  {id:'MED-011',name:'Natrum Mur',potency:'30C',stock:9,minStock:4,category:'Dilution',price:150},
+  {id:'MED-012',name:'Phosphorus',potency:'200C',stock:4,minStock:3,category:'Dilution',price:190},
+  {id:'MED-013',name:'Ignatia',potency:'200C',stock:6,minStock:3,category:'Dilution',price:160},
+  {id:'MED-014',name:'Sepia',potency:'200C',stock:5,minStock:3,category:'Dilution',price:170},
+  {id:'MED-015',name:'Thuja',potency:'1M',stock:3,minStock:2,category:'Dilution',price:210},
 ];
 
+// ==================== SYNCHRONIZATION ENGINE ====================
+let isOffline = false;
 
-// ==================== GOOGLE SHEETS SYNC ====================
-function getPrimaryKey(storeKey){
-  if(storeKey===KEYS.PATIENTS)return'PatientID';
-  if(storeKey===KEYS.CASES)return'CaseID';
-  if(storeKey===KEYS.COURIERS)return'CourierID';
-  if(storeKey===KEYS.BILLING)return'InvoiceID';
-  if(storeKey===KEYS.APPOINTMENTS)return'AppointmentID';
-  if(storeKey===KEYS.MEDICINES)return'MedicineID';
-  return'id';
-}
-
-function normalizeRecord(record, type) {
-  if(!record) return record;
-  // Normalize Google Sheets capitalized keys to lowercase app keys
-  const r = {...record};
-  if(type === 'patients') {
-    if(r.Name && !r.name) r.name = r.Name;
-    if(r.Mobile && !r.mobile) r.mobile = r.Mobile;
-    if(r.Age && !r.age) r.age = r.Age;
-    if(r.Gender && !r.gender) r.gender = r.Gender;
-    if(r.Address && !r.address) r.address = r.Address;
-    if(r.Occupation && !r.occupation) r.occupation = r.Occupation;
-    if(r.BloodGroup && !r.bloodGroup) r.bloodGroup = r.BloodGroup;
-    if(r.CreatedAt && !r.createdAt) r.createdAt = r.CreatedAt;
-  }
-  if(type === 'couriers') {
-    if(r.PatientName && !r.patientName) r.patientName = r.PatientName;
-    if(r.Mobile && !r.mobile) r.mobile = r.Mobile;
-    if(r.Address && !r.address) r.address = r.Address;
-    if(r.Status && !r.status) r.status = r.Status;
-    if(r.Carrier && !r.carrier) r.carrier = r.Carrier;
-    if(r.Tracking && !r.tracking) r.tracking = r.Tracking;
-    if(r.CreatedAt && !r.createdAt) r.createdAt = r.CreatedAt;
-  }
-  if(type === 'billing') {
-    if(r.PatientName && !r.patientName) r.patientName = r.PatientName;
-    if(r.Date && !r.date) r.date = r.Date;
-    if(r.Total && !r.total) r.total = parseFloat(r.Total)||0;
-    if(r.PaymentStatus && !r.paymentStatus) r.paymentStatus = r.PaymentStatus;
-  }
-  if(type === 'medicines') {
-    if(r.Name && !r.name) r.name = r.Name;
-    if(r.Potency && !r.potency) r.potency = r.Potency;
-    if(r.Category && !r.category) r.category = r.Category;
-    if(r.Stock !== undefined && r.stock === undefined) r.stock = parseInt(r.Stock)||0;
-    if(r.MinStock !== undefined && r.minStock === undefined) r.minStock = parseInt(r.MinStock)||0;
-    if(r.Price !== undefined && r.price === undefined) r.price = parseFloat(r.Price)||0;
-  }
-  return r;
-}
-
-function mergeData(localArr,remoteArr,pk){
-  const map=new Map();
-  remoteArr.forEach(item=>{if(item&&item[pk])map.set(item[pk],item);});
-  localArr.forEach(item=>{
-    if(item&&item[pk]){
-      if(!map.has(item[pk]))map.set(item[pk],item);
-      else{
-        const rem=map.get(item[pk]);
-        if((item.lastUpdated||0)>=(rem.lastUpdated||0))map.set(item[pk],Object.assign({},rem,item));
+// Merge list of items. Item with higher updatedAt wins.
+function mergeLists(localList, remoteList) {
+  const mergedMap = new Map();
+  // First load all remote items
+  remoteList.forEach(item => {
+    if (item && item.id) mergedMap.set(item.id, item);
+  });
+  // Then merge local items
+  localList.forEach(item => {
+    if (item && item.id) {
+      const existing = mergedMap.get(item.id);
+      if (!existing) {
+        mergedMap.set(item.id, item);
+      } else {
+        const localTime = item.updatedAt || 0;
+        const remoteTime = existing.updatedAt || 0;
+        if (localTime >= remoteTime) {
+          mergedMap.set(item.id, item);
+        }
       }
     }
   });
-  return Array.from(map.values());
+  return Array.from(mergedMap.values());
 }
 
-function addToQueue(action,type,data){
-  let q=getAll(KEYS.OFFLINE_QUEUE);
-  q.push({action,type,data,timestamp:Date.now()});
-  saveAll(KEYS.OFFLINE_QUEUE,q);
-}
+async function loadFromGoogleSheets() {
+  try {
+    const res = await fetch(WEB_APP_URL + "?action=get_data", {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
+    if (!res.ok) throw new Error("GET response not ok");
+    const data = await res.json();
+    if (data && data.success !== false) {
+      // Decode Prescriptions first so they can be attached to cases
+      let mappedPrescriptions = [];
+      if (Array.isArray(data.prescriptions)) {
+        mappedPrescriptions = data.prescriptions.map(rx => ({
+          caseId: rx.CaseID || rx.caseId || '',
+          patientId: rx.PatientID || rx.patientId || '',
+          name: rx.MedicineName || rx.name || '',
+          potency: rx.Potency || rx.potency || '',
+          dosage: rx.Dosage || rx.dosage || '',
+          duration: rx.Duration || rx.duration || ''
+        }));
+        saveAll(KEYS.PRESCRIPTIONS, mappedPrescriptions);
+      }
 
-async function processOfflineQueue(){
-  if(!navigator.onLine)return;
-  let q=getAll(KEYS.OFFLINE_QUEUE);
-  if(q.length===0)return;
-  for(let task of q){
-    let cur=getAll(task.type);
-    let pk=getPrimaryKey(task.type);
-    if(task.action==='SAVE'||task.action==='EDIT'){
-      let idx=cur.findIndex(x=>x[pk]===task.data[pk]);
-      if(idx!==-1)cur[idx]=task.data;else cur.unshift(task.data);
-    }else if(task.action==='DELETE'){cur=cur.filter(x=>x[pk]!==task.data[pk]);}
-    saveAll(task.type,cur);
-  }
-  saveAll(KEYS.OFFLINE_QUEUE,[]);
-  await syncToSheets();
-}
+      // Decode Patients (Google Sheet PatientID/Name -> frontend id/name)
+      if (Array.isArray(data.patients)) {
+        const mappedPatients = data.patients.map(p => ({
+          id: p.PatientID || p.id || '',
+          name: p.Name || p.name || '',
+          mobile: String(p.Mobile || p.mobile || ''),
+          age: parseInt(p.Age || p.age) || 0,
+          gender: p.Gender || p.gender || '',
+          address: p.Address || p.address || '',
+          occupation: p.Occupation || p.occupation || '',
+          bloodGroup: p.BloodGroup || p.bloodGroup || '',
+          createdAt: p.CreatedAt || p.createdAt || '',
+          updatedAt: p.updatedAt || Date.now()
+        }));
+        saveAll(KEYS.PATIENTS, mappedPatients);
+      }
 
-async function loadFromSheets(){
-  if(!navigator.onLine){updateSyncBadge();return;}
-  try{
-    const res=await fetch(WEB_APP_URL+'?action=get_data');
-    const remote=await res.json();
-    if(remote&&remote.success!==false){
-      if(remote.patients)saveAll(KEYS.PATIENTS,mergeData(getAll(KEYS.PATIENTS),remote.patients.map(r=>normalizeRecord(r,'patients')),'PatientID'));
-      if(remote.cases)saveAll(KEYS.CASES,mergeData(getAll(KEYS.CASES),remote.cases,'CaseID'));
-      if(remote.couriers)saveAll(KEYS.COURIERS,mergeData(getAll(KEYS.COURIERS),remote.couriers.map(r=>normalizeRecord(r,'couriers')),'CourierID'));
-      if(remote.billing)saveAll(KEYS.BILLING,mergeData(getAll(KEYS.BILLING),remote.billing.map(r=>normalizeRecord(r,'billing')),'InvoiceID'));
-      if(remote.appointments)saveAll(KEYS.APPOINTMENTS,mergeData(getAll(KEYS.APPOINTMENTS),remote.appointments,'AppointmentID'));
-      if(remote.medicines&&remote.medicines.length>0)saveAll(KEYS.MEDICINES,mergeData(getAll(KEYS.MEDICINES),remote.medicines.map(r=>normalizeRecord(r,'medicines')),'MedicineID'));
-      let sm=ls('sync_meta')||{};
-      sm.lastSync=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-      ss('sync_meta',sm);
+      // Decode Cases and rebuild the prescriptions sub-array using Prescriptions sheet
+      if (Array.isArray(data.cases)) {
+        const mappedCases = data.cases.map(c => {
+          const cid = c.CaseID || c.id || '';
+          const rxs = mappedPrescriptions.filter(r => r.caseId === cid).map(r => ({
+            name: r.name,
+            potency: r.potency,
+            dosage: r.dosage,
+            duration: r.duration
+          }));
+          return {
+            id: cid,
+            patientId: c.PatientID || c.patientId || '',
+            date: c.Date || c.date || '',
+            visitType: c.VisitType || c.visitType || '',
+            complaint: c.Complaint || c.complaint || '',
+            duration: c.Duration || c.duration || '',
+            notes: c.Notes || c.notes || '',
+            followUpDate: c.FollowUpDate || c.followUpDate || '',
+            fee: parseFloat(c.Fee || c.fee) || 0,
+            medCharge: parseFloat(c.MedCharge || c.medCharge) || 0,
+            courierCharge: parseFloat(c.CourierCharge || c.courierCharge) || 0,
+            payStatus: c.PayStatus || c.payStatus || '',
+            payMode: c.PayMode || c.payMode || '',
+            prescriptions: rxs.length > 0 ? rxs : (c.prescriptions || []),
+            updatedAt: c.updatedAt || Date.now()
+          };
+        });
+        saveAll(KEYS.CASES, mappedCases);
+      }
+
+      // Decode Couriers
+      if (Array.isArray(data.couriers)) {
+        const mappedCouriers = data.couriers.map(co => ({
+          id: co.CourierID || co.id || '',
+          patientId: co.PatientID || co.patientId || '',
+          patientName: co.PatientName || co.patientName || '',
+          mobile: String(co.Mobile || co.mobile || ''),
+          address: co.Address || co.address || '',
+          caseId: co.CaseID || co.caseId || '',
+          status: co.Status || co.status || '',
+          carrier: co.Carrier || co.carrier || '',
+          tracking: co.Tracking || co.tracking || '',
+          dispatchDate: co.DispatchDate || co.dispatchDate || '',
+          deliveryDate: co.DeliveryDate || co.deliveryDate || '',
+          createdAt: co.CreatedAt || co.createdAt || '',
+          updatedAt: co.updatedAt || Date.now()
+        }));
+        saveAll(KEYS.COURIERS, mappedCouriers);
+      }
+
+      // Decode Billing
+      if (Array.isArray(data.billing)) {
+        const mappedBilling = data.billing.map(b => ({
+          id: b.InvoiceID || b.id || '',
+          patientId: b.PatientID || b.patientId || '',
+          patientName: b.PatientName || b.patientName || '',
+          date: b.Date || b.date || '',
+          consultFee: parseFloat(b.ConsultFee || b.consultFee) || 0,
+          medCharge: parseFloat(b.MedCharge || b.medCharge) || 0,
+          courierCharge: parseFloat(b.CourierCharge || b.courierCharge) || 0,
+          total: parseFloat(b.Total || b.total) || 0,
+          payMode: b.PayMode || b.payMode || '',
+          paymentStatus: b.PaymentStatus || b.paymentStatus || '',
+          updatedAt: b.updatedAt || Date.now()
+        }));
+        saveAll(KEYS.BILLING, mappedBilling);
+      }
+
+      // Decode Appointments
+      if (Array.isArray(data.appointments)) {
+        const mappedAppointments = data.appointments.map(a => ({
+          id: a.AppointmentID || a.id || '',
+          patientName: a.PatientName || a.patientName || '',
+          mobile: String(a.Mobile || a.mobile || ''),
+          date: a.Date || a.date || '',
+          time: a.Time || a.time || '',
+          type: a.Type || a.type || '',
+          status: a.Status || a.status || '',
+          notes: a.Notes || a.notes || '',
+          updatedAt: a.updatedAt || Date.now()
+        }));
+        saveAll(KEYS.APPOINTMENTS, mappedAppointments);
+      }
+
+      // Decode Medicines
+      if (Array.isArray(data.medicines)) {
+        const mappedMedicines = data.medicines.map(m => ({
+          id: m.MedicineID || m.id || '',
+          name: m.Name || m.name || '',
+          potency: m.Potency || m.potency || '',
+          category: m.Category || m.category || '',
+          stock: parseInt(m.Stock || m.stock) || 0,
+          minStock: parseInt(m.MinStock || m.minStock) || 0,
+          price: parseFloat(m.Price || m.price) || 0,
+          updatedAt: m.updatedAt || Date.now()
+        }));
+        saveAll(KEYS.MEDICINES, mappedMedicines);
+      }
+
+      const sync = ls(KEYS.SYNC) || { url: WEB_APP_URL, enabled: true };
+      sync.lastSync = new Date().toLocaleString('en-IN');
+      ss(KEYS.SYNC, sync);
+
+      isOffline = false;
+      document.getElementById('offline-badge').classList.add('hidden');
+      updateSyncBadge();
     }
-    updateSyncBadge();
-  }catch(e){console.error('Load from sheets failed',e);updateSyncBadge();}
+  } catch (err) {
+    console.error("Offline or error loading from Google Sheets:", err);
+    isOffline = true;
+    document.getElementById('offline-badge').classList.remove('hidden');
+  }
+
+  // Refresh current state
+  if (currentUser) {
+    buildNav();
+    renderView();
+  } else {
+    const cfg = ls(KEYS.SETTINGS) || {};
+    document.getElementById('clinic-name-display').textContent = cfg.clinicName || 'Homeopathy Clinic';
+  }
 }
 
-async function syncToSheets(){
-  if(!navigator.onLine){updateSyncBadge();return;}
-  try{
-    const payload={action:'sync_all',
-      patients:getAll(KEYS.PATIENTS),cases:getAll(KEYS.CASES),
-      couriers:getAll(KEYS.COURIERS),billing:getAll(KEYS.BILLING),
-      appointments:getAll(KEYS.APPOINTMENTS),medicines:getAll(KEYS.MEDICINES)};
-    await fetch(WEB_APP_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)});
-    let sm=ls('sync_meta')||{};
-    sm.lastSync=new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-    ss('sync_meta',sm);
-    updateSyncBadge();
-  }catch(e){console.error('Sync to sheets failed',e);}
+async function syncToGoogleSheets() {
+  try {
+    // 1. Download latest data to avoid overwriting stale data (Download -> Merge -> Upload -> Reload)
+    let remoteData = null;
+    try {
+      const res = await fetch(WEB_APP_URL + "?action=get_data", {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+      if (res.ok) {
+        remoteData = await res.json();
+      }
+    } catch (e) {
+      console.warn("Could not retrieve remote data for merge. Syncing direct local state.", e);
+    }
+
+    if (remoteData) {
+      // Map remoteData to camelCase first before merging to ensure IDs match correctly!
+      const remotePrescriptionsMapped = (remoteData.prescriptions || []).map(rx => ({
+        caseId: rx.CaseID || rx.caseId || '',
+        patientId: rx.PatientID || rx.patientId || '',
+        name: rx.MedicineName || rx.name || '',
+        potency: rx.Potency || rx.potency || '',
+        dosage: rx.Dosage || rx.dosage || '',
+        duration: rx.Duration || rx.duration || ''
+      }));
+
+      const remotePatientsMapped = (remoteData.patients || []).map(p => ({
+        id: p.PatientID || p.id || '',
+        name: p.Name || p.name || '',
+        mobile: String(p.Mobile || p.mobile || ''),
+        age: parseInt(p.Age || p.age) || 0,
+        gender: p.Gender || p.gender || '',
+        address: p.Address || p.address || '',
+        occupation: p.Occupation || p.occupation || '',
+        bloodGroup: p.BloodGroup || p.bloodGroup || '',
+        createdAt: p.CreatedAt || p.createdAt || '',
+        updatedAt: p.updatedAt || Date.now()
+      }));
+
+      const remoteCasesMapped = (remoteData.cases || []).map(c => {
+        const cid = c.CaseID || c.id || '';
+        const rxs = remotePrescriptionsMapped.filter(r => r.caseId === cid).map(r => ({
+          name: r.name,
+          potency: r.potency,
+          dosage: r.dosage,
+          duration: r.duration
+        }));
+        return {
+          id: cid,
+          patientId: c.PatientID || c.patientId || '',
+          date: c.Date || c.date || '',
+          visitType: c.VisitType || c.visitType || '',
+          complaint: c.Complaint || c.complaint || '',
+          duration: c.Duration || c.duration || '',
+          notes: c.Notes || c.notes || '',
+          followUpDate: c.FollowUpDate || c.followUpDate || '',
+          fee: parseFloat(c.Fee || c.fee) || 0,
+          medCharge: parseFloat(c.MedCharge || c.medCharge) || 0,
+          courierCharge: parseFloat(c.CourierCharge || c.courierCharge) || 0,
+          payStatus: c.PayStatus || c.payStatus || '',
+          payMode: c.PayMode || c.payMode || '',
+          prescriptions: rxs.length > 0 ? rxs : (c.prescriptions || []),
+          updatedAt: c.updatedAt || Date.now()
+        };
+      });
+
+      const remoteCouriersMapped = (remoteData.couriers || []).map(co => ({
+        id: co.CourierID || co.id || '',
+        patientId: co.PatientID || co.patientId || '',
+        patientName: co.PatientName || co.patientName || '',
+        mobile: String(co.Mobile || co.mobile || ''),
+        address: co.Address || co.address || '',
+        caseId: co.CaseID || co.caseId || '',
+        status: co.Status || co.status || '',
+        carrier: co.Carrier || co.carrier || '',
+        tracking: co.Tracking || co.tracking || '',
+        dispatchDate: co.DispatchDate || co.dispatchDate || '',
+        deliveryDate: co.DeliveryDate || co.deliveryDate || '',
+        createdAt: co.CreatedAt || co.createdAt || '',
+        updatedAt: co.updatedAt || Date.now()
+      }));
+
+      const remoteBillingMapped = (remoteData.billing || []).map(b => ({
+        id: b.InvoiceID || b.id || '',
+        patientId: b.PatientID || b.patientId || '',
+        patientName: b.PatientName || b.patientName || '',
+        date: b.Date || b.date || '',
+        consultFee: parseFloat(b.ConsultFee || b.consultFee) || 0,
+        medCharge: parseFloat(b.MedCharge || b.medCharge) || 0,
+        courierCharge: parseFloat(b.CourierCharge || b.courierCharge) || 0,
+        total: parseFloat(b.Total || b.total) || 0,
+        payMode: b.PayMode || b.payMode || '',
+        paymentStatus: b.PaymentStatus || b.paymentStatus || '',
+        updatedAt: b.updatedAt || Date.now()
+      }));
+
+      const remoteAppointmentsMapped = (remoteData.appointments || []).map(a => ({
+        id: a.AppointmentID || a.id || '',
+        patientName: a.PatientName || a.patientName || '',
+        mobile: String(a.Mobile || a.mobile || ''),
+        date: a.Date || a.date || '',
+        time: a.Time || a.time || '',
+        type: a.Type || a.type || '',
+        status: a.Status || a.status || '',
+        notes: a.Notes || a.notes || '',
+        updatedAt: a.updatedAt || Date.now()
+      }));
+
+      const remoteMedicinesMapped = (remoteData.medicines || []).map(m => ({
+        id: m.MedicineID || m.id || '',
+        name: m.Name || m.name || '',
+        potency: m.Potency || m.potency || '',
+        category: m.Category || m.category || '',
+        stock: parseInt(m.Stock || m.stock) || 0,
+        minStock: parseInt(m.MinStock || m.minStock) || 0,
+        price: parseFloat(m.Price || m.price) || 0,
+        updatedAt: m.updatedAt || Date.now()
+      }));
+
+      const mergedPatients = mergeLists(getAll(KEYS.PATIENTS), remotePatientsMapped);
+      const mergedCases = mergeLists(getAll(KEYS.CASES), remoteCasesMapped);
+      const mergedCouriers = mergeLists(getAll(KEYS.COURIERS), remoteCouriersMapped);
+      const mergedBilling = mergeLists(getAll(KEYS.BILLING), remoteBillingMapped);
+      const mergedAppointments = mergeLists(getAll(KEYS.APPOINTMENTS), remoteAppointmentsMapped);
+      const mergedMedicines = mergeLists(getAll(KEYS.MEDICINES), remoteMedicinesMapped);
+
+      saveAll(KEYS.PATIENTS, mergedPatients);
+      saveAll(KEYS.CASES, mergedCases);
+      saveAll(KEYS.COURIERS, mergedCouriers);
+      saveAll(KEYS.BILLING, mergedBilling);
+      saveAll(KEYS.APPOINTMENTS, mergedAppointments);
+      saveAll(KEYS.MEDICINES, mergedMedicines);
+    }
+
+    // 2. Prepare payload (always in camelCase, matching Apps Script expectations)
+    const payload = {
+      action: "sync_all",
+      patients: getAll(KEYS.PATIENTS),
+      cases: getAll(KEYS.CASES),
+      couriers: getAll(KEYS.COURIERS),
+      billing: getAll(KEYS.BILLING),
+      appointments: getAll(KEYS.APPOINTMENTS),
+      medicines: getAll(KEYS.MEDICINES)
+    };
+
+    // 3. Upload merged data
+    await fetch(WEB_APP_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    isOffline = false;
+    document.getElementById('offline-badge').classList.add('hidden');
+
+    // 4. Reload latest from sheets
+    await loadFromGoogleSheets();
+  } catch (err) {
+    console.error("Synchronization failed:", err);
+    isOffline = true;
+    document.getElementById('offline-badge').classList.remove('hidden');
+  }
 }
 
-async function executeCrud(storeKey,action,itemData){
-  let pk=getPrimaryKey(storeKey);
-  itemData.lastUpdated=Date.now();
-  let dataList=getAll(storeKey);
-  if(action==='SAVE'||action==='EDIT'){
-    let idx=dataList.findIndex(x=>x[pk]===itemData[pk]);
-    if(idx!==-1)dataList[idx]=itemData;else dataList.unshift(itemData);
-  }else if(action==='DELETE'){dataList=dataList.filter(x=>x[pk]!==itemData[pk]);}
-  saveAll(storeKey,dataList);
-  if(!navigator.onLine){addToQueue(action,storeKey,itemData);updateSyncBadge();}
-  else{await syncToSheets();}
+// Manual Sync Now button handler
+async function manualSyncNow() {
+  const btn = document.getElementById('sync-now-btn');
+  if (btn) btn.disabled = true;
+  await loadFromGoogleSheets();
+  if (btn) btn.disabled = false;
+  alert('🔄 Data synchronization complete!');
 }
 
-window.addEventListener('online',async()=>{await processOfflineQueue();});
-window.addEventListener('offline',()=>{updateSyncBadge();});
-setInterval(loadFromSheets,30000);
+// Auto-Sync and state listener on connection status
+window.addEventListener('online', async () => {
+  console.log("Internet restored. Auto-synchronizing pending changes...");
+  await syncToGoogleSheets();
+});
+window.addEventListener('offline', () => {
+  isOffline = true;
+  document.getElementById('offline-badge').classList.remove('hidden');
+});
+
+// Auto-refresh interval (30 seconds)
+setInterval(loadFromGoogleSheets, 30000);
 
 // ==================== AUTH ====================
 let currentUser=null;
@@ -531,32 +781,20 @@ function closeSidebar(){
 }
 
 // ==================== APP START ====================
-async function startApp(){
+function startApp(){
   initDB();
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   buildNav();
   renderView();
   updateSyncBadge();
-  await loadFromSheets();
 }
 
 function updateSyncBadge(){
+  const cfg=ls(KEYS.SYNC)||{};
   const el=document.getElementById('sync-badge');
-  if(!el)return;
-  let q=getAll(KEYS.OFFLINE_QUEUE);
-  const sm=ls('sync_meta')||{};
-  if(!navigator.onLine||q.length>0){
-    el.textContent='⚠️ Offline ('+(q.length)+' pending)';
-    el.style.display='';el.style.background='var(--rose-50)';
-    el.style.color='var(--rose-700)';el.style.borderColor='var(--rose-100)';
-  } else if(sm.lastSync){
-    el.textContent='✅ Synced '+sm.lastSync;
-    el.style.display='';el.style.background='var(--emerald-50)';
-    el.style.color='var(--emerald-700)';el.style.borderColor='var(--emerald-100)';
-  } else {
-    el.style.display='none';
-  }
+  if(cfg.enabled&&cfg.lastSync){el.textContent='Synced: '+cfg.lastSync;el.style.display='';}
+  else el.style.display='none';
 }
 
 function renderView(){
@@ -580,7 +818,7 @@ function fmt(n){return'₹'+(n||0).toLocaleString('en-IN');}
 function today(){return new Date().toISOString().split('T')[0];}
 function fmtDate(d){if(!d)return'-';const dt=new Date(d);return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}
 function genId(prefix,list){return`${prefix}-${(list.length+1).toString().padStart(4,'0')}`;}
-function patientInitials(name){if(!name)return'??';return name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,2)||'??';}
+function patientInitials(name){return name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);}
 
 // ==================== DASHBOARD ====================
 function renderDashboard(){
@@ -640,7 +878,7 @@ function renderDashboard(){
       </div>
       ${todayFollowups.length===0?`<div class="empty-state" style="padding:20px;"><div class="empty-icon">✅</div><div class="empty-sub">No follow-ups today</div></div>`:''}
       ${todayFollowups.slice(0,4).map(c=>{
-        const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===c.patientId)||{name:'Unknown',mobile:''};
+        const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===c.patientId)||{name:'Unknown',mobile:''};
         return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--slate-100);">
           <div class="patient-avatar" style="width:32px;height:32px;font-size:11px;">${patientInitials(p.name)}</div>
           <div style="flex:1;">
@@ -660,7 +898,7 @@ function renderDashboard(){
       </div>
       ${missedFollowups.length===0?`<div class="empty-state" style="padding:20px;"><div class="empty-icon">✅</div><div class="empty-sub">No overdue follow-ups</div></div>`:''}
       ${missedFollowups.slice(0,4).map(c=>{
-        const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===c.patientId)||{name:'Unknown',mobile:''};
+        const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===c.patientId)||{name:'Unknown',mobile:''};
         const days=Math.floor((new Date()-new Date(c.followUpDate))/(1000*86400));
         return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--slate-100);">
           <div class="patient-avatar" style="width:32px;height:32px;font-size:11px;">${patientInitials(p.name)}</div>
@@ -729,7 +967,7 @@ function renderPatients(){
 function filterPatients(){
   const q=document.getElementById('patient-search').value.toLowerCase();
   const all=getAll(KEYS.PATIENTS);
-  const filtered=all.filter(p=>{const n=(p.name||p.Name||'').toLowerCase();const m=(p.mobile||p.Mobile||'');const id=(p.PatientID||'').toLowerCase();return n.includes(q)||m.includes(q)||id.includes(q);});
+  const filtered=all.filter(p=>p.name.toLowerCase().includes(q)||p.mobile.includes(q)||p.id.toLowerCase().includes(q));
   renderPatientList(filtered);
 }
 
@@ -740,18 +978,18 @@ function renderPatientList(patients){
     el.innerHTML=`<div class="card"><div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">No patients found</div><div class="empty-sub">Register your first patient to get started</div></div></div>`;
     return;
   }
-  el.innerHTML=patients.map(p=>{const nm=p.name||p.Name||'Unknown';const mb=p.mobile||p.Mobile||'';const ag=p.age||p.Age||'';const gn=p.gender||p.Gender||'';const pid=p.PatientID||p.id||'';return`
-  <div class="patient-row" onclick="showPatientDetail('${pid}')">
-    <div class="patient-avatar">${patientInitials(nm)}</div>
+  el.innerHTML=patients.map(p=>`
+  <div class="patient-row" onclick="showPatientDetail('${p.id}')">
+    <div class="patient-avatar">${patientInitials(p.name)}</div>
     <div style="flex:1;">
-      <div class="patient-name">${nm}</div>
-      <div class="patient-meta">${mb} · ${ag}y · ${gn} · <span style="font-family:monospace;font-size:10px;">${pid}</span></div>
+      <div class="patient-name">${p.name}</div>
+      <div class="patient-meta">${p.mobile} · ${p.age}y · ${p.gender} · <span style="font-family:monospace;font-size:10px;">${p.id}</span></div>
     </div>
     <div style="display:flex;gap:6px;align-items:center;">
-      ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startConsult('${p.PatientID}')">🩺 Consult</button>`:''}
+      ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startConsult('${p.id}')">🩺 Consult</button>`:''}
       <span style="color:var(--slate-300);font-size:18px;">›</span>
     </div>
-  </div>`;}).join('');
+  </div>`).join('');
 }
 
 function showAddPatient(){
@@ -813,49 +1051,49 @@ async function savePatient(){
   if(!name||!mobile||!age||!gender){err.textContent='Please fill required fields.';err.classList.remove('hidden');return;}
   const patients=getAll(KEYS.PATIENTS);
   const year=new Date().getFullYear();
-  const PatientID=`HOM-${year}-${(patients.length+1).toString().padStart(4,'0')}`;
-  const p={PatientID,name,mobile,age:parseInt(age),gender,address:document.getElementById('p-address').value,occupation:document.getElementById('p-occupation').value,bloodGroup:document.getElementById('p-blood').value,createdAt:today()};
+  const id=`HOM-${year}-${(patients.length+1).toString().padStart(4,'0')}`;
+  const p={
+    id,name,mobile,age:parseInt(age),gender,
+    address:document.getElementById('p-address').value,
+    occupation:document.getElementById('p-occupation').value,
+    bloodGroup:document.getElementById('p-blood').value,
+    createdAt:today(),updatedAt:Date.now()
+  };
+  patients.unshift(p);
+  saveAll(KEYS.PATIENTS,patients);
   closeModal();
-  await executeCrud(KEYS.PATIENTS,'SAVE',p);
   renderPatients();
+  await syncToGoogleSheets();
 }
 
 function showPatientDetail(pid){
   const patients=getAll(KEYS.PATIENTS);
-  const p=patients.find(pt=>(pt.PatientID||pt.id)===pid);
+  const p=patients.find(pt=>pt.id===pid);
   if(!p)return;
-  // Normalize fields
-  const pName=p.name||p.Name||'Unknown';
-  const pMobile=p.mobile||p.Mobile||'';
-  const pAge=p.age||p.Age||'';
-  const pGender=p.gender||p.Gender||'';
-  const pBlood=p.bloodGroup||p.BloodGroup||'Unknown';
-  const pAddress=p.address||p.Address||'';
-  const pPID=p.PatientID||p.id||'';
   const cases=getAll(KEYS.CASES).filter(c=>c.patientId===pid).sort((a,b)=>b.date.localeCompare(a.date));
   showModal(`
   <div class="modal-header">
     <div style="display:flex;align-items:center;gap:12px;">
-      <div class="patient-avatar" style="width:48px;height:48px;font-size:16px;">${patientInitials(pName)}</div>
+      <div class="patient-avatar" style="width:48px;height:48px;font-size:16px;">${patientInitials(p.name)}</div>
       <div>
-        <div class="modal-title">${pName}</div>
-        <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${pPID}</div>
+        <div class="modal-title">${p.name}</div>
+        <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${p.id}</div>
       </div>
     </div>
     <button class="close-btn" onclick="closeModal()">✕</button>
   </div>
 
   <div class="grid-3" style="margin-bottom:16px;">
-    <div class="card-sm"><div class="label">Mobile</div><div style="font-weight:700;">${pMobile}</div></div>
-    <div class="card-sm"><div class="label">Age / Gender</div><div style="font-weight:700;">${pAge}y · ${pGender}</div></div>
-    <div class="card-sm"><div class="label">Blood Group</div><div style="font-weight:700;">${pBlood}</div></div>
+    <div class="card-sm"><div class="label">Mobile</div><div style="font-weight:700;">${p.mobile}</div></div>
+    <div class="card-sm"><div class="label">Age / Gender</div><div style="font-weight:700;">${p.age}y · ${p.gender}</div></div>
+    <div class="card-sm"><div class="label">Blood Group</div><div style="font-weight:700;">${p.bloodGroup||'Unknown'}</div></div>
   </div>
-  ${pAddress?`<div class="card-sm" style="margin-bottom:12px;"><div class="label">Address</div><div style="font-size:12px;color:var(--slate-600);">${pAddress}</div></div>`:''}
+  ${p.address?`<div class="card-sm" style="margin-bottom:12px;"><div class="label">Address</div><div style="font-size:12px;color:var(--slate-600);">${p.address}</div></div>`:''}
 
   <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-    ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="closeModal();startConsult('${pPID}')">🩺 New Consultation</button>`:''}
-    <button class="btn btn-secondary btn-sm" onclick="showEditPatient('${pPID}')">✏️ Edit</button>
-    <button class="btn btn-secondary btn-sm" onclick="showMedHistory('${pPID}')">📋 Medical History</button>
+    ${currentUser.role==='doctor'?`<button class="btn btn-primary btn-sm" onclick="closeModal();startConsult('${p.id}')">🩺 New Consultation</button>`:''}
+    <button class="btn btn-secondary btn-sm" onclick="showEditPatient('${p.id}')">✏️ Edit</button>
+    <button class="btn btn-secondary btn-sm" onclick="showMedHistory('${p.id}')">📋 Medical History</button>
   </div>
 
   <div style="font-size:13px;font-weight:800;color:var(--slate-700);margin-bottom:10px;">Visit History (${cases.length})</div>
@@ -876,7 +1114,7 @@ function showPatientDetail(pid){
 }
 
 function showEditPatient(pid){
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===pid);
+  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===pid);
   if(!p)return;
   showModal(`
   <div class="modal-header">
@@ -907,9 +1145,9 @@ function showEditPatient(pid){
 
 async function updatePatient(pid){
   const patients=getAll(KEYS.PATIENTS);
-  const idx=patients.findIndex(p=>p.PatientID===pid);
+  const idx=patients.findIndex(p=>p.id===pid);
   if(idx===-1)return;
-  const updated={...patients[idx],
+  patients[idx]={...patients[idx],
     name:document.getElementById('ep-name').value,
     mobile:document.getElementById('ep-mobile').value,
     age:parseInt(document.getElementById('ep-age').value),
@@ -917,10 +1155,12 @@ async function updatePatient(pid){
     address:document.getElementById('ep-address').value,
     occupation:document.getElementById('ep-occupation').value,
     bloodGroup:document.getElementById('ep-blood').value,
+    updatedAt:Date.now()
   };
+  saveAll(KEYS.PATIENTS,patients);
   closeModal();
-  await executeCrud(KEYS.PATIENTS,'EDIT',updated);
   renderPatients();
+  await syncToGoogleSheets();
 }
 
 function showMedHistory(pid){
@@ -958,9 +1198,10 @@ function showMedHistory(pid){
   </div>`);
 }
 
-function saveMedHistory(pid){
+async function saveMedHistory(pid){
   const cases=getAll(KEYS.CASES);
-  const entry={patientId:pid,date:today(),type:'history',
+  const entry={
+    id:'REC-MH-'+Date.now(),patientId:pid,date:today(),type:'history',
     complaint:document.getElementById('mh-complaint').value,
     symptoms:document.getElementById('mh-symptoms').value,
     duration:document.getElementById('mh-duration').value,
@@ -973,12 +1214,14 @@ function saveMedHistory(pid){
     thirst:document.getElementById('mh-thirst').value,
     mentalSymptoms:document.getElementById('mh-mental').value,
     thermalNature:document.getElementById('mh-thermal').value,
-    prescriptions:[],visitType:'history'
+    prescriptions:[],visitType:'history',
+    updatedAt:Date.now()
   };
   cases.unshift(entry);
   saveAll(KEYS.CASES,cases);
   closeModal();
   alert('Medical history saved!');
+  await syncToGoogleSheets();
 }
 
 // ==================== CONSULTATION ====================
@@ -1134,8 +1377,7 @@ function selectConsultPatient(id,name,mobile){
   document.getElementById('c-suggestions').innerHTML='';
   document.getElementById('c-selected').textContent='✅ '+name+' · '+id;
   document.getElementById('c-selected').classList.remove('hidden');
-  // Auto fill ship address
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===id);
+  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===id);
   if(p&&p.address)document.getElementById('c-shipaddr')&&(document.getElementById('c-shipaddr').value=p.address);
 }
 
@@ -1199,7 +1441,7 @@ function collectRx(){
   return rxs;
 }
 
-function saveConsult(){
+async function saveConsult(){
   const pid=document.getElementById('c-pid').value;
   const complaint=document.getElementById('c-complaint').value.trim();
   const err=document.getElementById('c-err');
@@ -1211,7 +1453,7 @@ function saveConsult(){
   const medCharge=parseFloat(document.getElementById('c-medcharge').value)||0;
   const courierCharge=visitType==='online'?(parseFloat(document.getElementById('c-couriercharge').value)||0):0;
   const payStatus=document.getElementById('c-paystatus').value;
-  const CaseID='REC-'+Date.now();
+  const caseId='REC-'+Date.now();
 
   const consult={
     id:caseId,patientId:pid,date:today(),visitType,
@@ -1220,13 +1462,14 @@ function saveConsult(){
     prescriptions,
     followUpDate:document.getElementById('c-followup').value||'',
     payStatus,fee,medCharge,courierCharge,
+    updatedAt:Date.now()
   };
   const cases=getAll(KEYS.CASES);
   cases.unshift(consult);
   saveAll(KEYS.CASES,cases);
 
   // Billing entry
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.PatientID===pid);
+  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===pid);
   const total=fee+medCharge+courierCharge;
   if(total>0){
     const bills=getAll(KEYS.BILLING);
@@ -1236,7 +1479,8 @@ function saveConsult(){
       patientId:pid,patientName:p?.name||'',date:today(),
       consultFee:fee,medCharge,courierCharge,total,
       payMode:document.getElementById('c-paymode').value,
-      paymentStatus:payStatus
+      paymentStatus:payStatus,
+      updatedAt:Date.now()
     });
     saveAll(KEYS.BILLING,bills);
   }
@@ -1248,17 +1492,18 @@ function saveConsult(){
       id:'COU-'+(couriers.length+1).toString().padStart(3,'0'),
       patientId:pid,patientName:p?.name||'',mobile:p?.mobile||'',
       address:document.getElementById('c-shipaddr').value,
-      caseId:CaseID,status:'Prescription Ready',
+      caseId,status:'Prescription Ready',
       dispatchDate:'',deliveryDate:'',carrier:'',tracking:'',notes:'',
-      createdAt:today()
+      createdAt:today(),
+      updatedAt:Date.now()
     });
     saveAll(KEYS.COURIERS,couriers);
   }
 
-  syncToSheets();
   navParam=null;
   navigate('patients');
   setTimeout(()=>alert('✅ Consultation saved successfully!'),100);
+  await syncToGoogleSheets();
 }
 
 // ==================== COURIER ====================
@@ -1301,7 +1546,7 @@ function filterCouriers(){
   const sf=document.getElementById('courier-status-filter')?.value||'All';
   const couriers=getAll(KEYS.COURIERS);
   const filtered=couriers.filter(c=>{
-    const mq=c.patientName.toLowerCase().includes(q)||c.CourierID.toLowerCase().includes(q)||(c.tracking||'').toLowerCase().includes(q);
+    const mq=c.patientName.toLowerCase().includes(q)||c.id.toLowerCase().includes(q)||(c.tracking||'').toLowerCase().includes(q);
     const ms=sf==='All'||c.status===sf;
     return mq&&ms;
   });
@@ -1321,7 +1566,7 @@ function renderCourierList(couriers){
     return`<div class="courier-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
         <div>
-          <div style="font-size:13px;font-weight:800;">${c.patientName} <span style="font-family:monospace;font-size:10px;color:var(--slate-400);">${c.CourierID}</span></div>
+          <div style="font-size:13px;font-weight:800;">${c.patientName} <span style="font-family:monospace;font-size:10px;color:var(--slate-400);">${c.id}</span></div>
           <div style="font-size:11px;color:var(--slate-400);">${c.mobile} · ${fmtDate(c.createdAt)}</div>
         </div>
         <span class="badge ${isDone?'badge-emerald':sIdx>=3?'badge-indigo':'badge-amber'}">${c.status}</span>
@@ -1343,31 +1588,32 @@ function renderCourierList(couriers){
       ${c.carrier?`<div style="font-size:11px;color:var(--indigo-600);margin-bottom:8px;font-weight:700;">🚚 ${c.carrier} · #${c.tracking}</div>`:''}
 
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-        <button class="btn btn-secondary btn-sm" onclick="showCourierEdit('${c.CourierID}')">✏️ Tracking Info</button>
-        <button class="btn btn-secondary btn-sm" onclick="sendCourierWA('${c.CourierID}')">💬 WhatsApp</button>
-        ${!isDone?`<button class="btn btn-primary btn-sm" onclick="progressCourier('${c.CourierID}')">▶ Move to: ${COURIER_PIPELINE[sIdx+1]}</button>`:'<span class="badge badge-emerald">✅ Delivered</span>'}
+        <button class="btn btn-secondary btn-sm" onclick="showCourierEdit('${c.id}')">✏️ Tracking Info</button>
+        <button class="btn btn-secondary btn-sm" onclick="sendCourierWA('${c.id}')">💬 WhatsApp</button>
+        ${!isDone?`<button class="btn btn-primary btn-sm" onclick="progressCourier('${c.id}')">▶ Move to: ${COURIER_PIPELINE[sIdx+1]}</button>`:'<span class="badge badge-emerald">✅ Delivered</span>'}
       </div>
     </div>`;
   }).join('');
 }
 
-function progressCourier(id){
+async function progressCourier(id){
   const couriers=getAll(KEYS.COURIERS);
-  const idx=couriers.findIndex(c=>c.CourierID===id);
+  const idx=couriers.findIndex(c=>c.id===id);
   if(idx===-1)return;
   const sIdx=COURIER_PIPELINE.indexOf(couriers[idx].status);
   if(sIdx<COURIER_PIPELINE.length-1){
     couriers[idx].status=COURIER_PIPELINE[sIdx+1];
     if(couriers[idx].status==='Courier Dispatched')couriers[idx].dispatchDate=today();
     if(couriers[idx].status==='Delivered')couriers[idx].deliveryDate=today();
+    couriers[idx].updatedAt=Date.now();
     saveAll(KEYS.COURIERS,couriers);
-    syncToSheets();
     renderCourier();
+    await syncToGoogleSheets();
   }
 }
 
 function showCourierEdit(id){
-  const c=getAll(KEYS.COURIERS).find(x=>x.CourierID===id);
+  const c=getAll(KEYS.COURIERS).find(x=>x.id===id);
   if(!c)return;
   showModal(`
   <div class="modal-header">
@@ -1390,21 +1636,22 @@ function showCourierEdit(id){
   </div>`);
 }
 
-function saveCourierEdit(id){
+async function saveCourierEdit(id){
   const couriers=getAll(KEYS.COURIERS);
-  const idx=couriers.findIndex(c=>c.CourierID===id);
+  const idx=couriers.findIndex(c=>c.id===id);
   if(idx===-1)return;
   couriers[idx].carrier=document.getElementById('ce-carrier').value;
   couriers[idx].tracking=document.getElementById('ce-tracking').value;
   couriers[idx].notes=document.getElementById('ce-notes').value;
+  couriers[idx].updatedAt=Date.now();
   saveAll(KEYS.COURIERS,couriers);
-  syncToSheets();
   closeModal();
   renderCourier();
+  await syncToGoogleSheets();
 }
 
 function sendCourierWA(id){
-  const c=getAll(KEYS.COURIERS).find(x=>x.CourierID===id);
+  const c=getAll(KEYS.COURIERS).find(x=>x.id===id);
   if(!c)return;
   const cfg=ls(KEYS.SETTINGS)||{};
   const drName=cfg.doctorName||'Doctor';
@@ -1456,7 +1703,7 @@ function filterBills(){
   const sf=document.getElementById('bill-status-filter')?.value||'All';
   const bills=getAll(KEYS.BILLING);
   const filtered=bills.filter(b=>{
-    const mq=b.patientName.toLowerCase().includes(q)||b.InvoiceID.toLowerCase().includes(q);
+    const mq=b.patientName.toLowerCase().includes(q)||b.id.toLowerCase().includes(q);
     const ms=sf==='All'||b.paymentStatus===sf;
     return mq&&ms;
   });
@@ -1474,7 +1721,7 @@ function renderBillList(bills){
   <div class="billing-row">
     <div style="flex:1;">
       <div style="font-size:12px;font-weight:800;color:var(--slate-800);">${b.patientName}</div>
-      <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${b.InvoiceID} · ${fmtDate(b.date)}</div>
+      <div style="font-size:11px;color:var(--slate-400);font-family:monospace;">${b.id} · ${fmtDate(b.date)}</div>
       <div style="font-size:11px;color:var(--slate-500);margin-top:2px;">
         Consult: ${fmt(b.consultFee)} | Meds: ${fmt(b.medCharge)} ${b.courierCharge?'| Courier: '+fmt(b.courierCharge):''}
       </div>
@@ -1484,18 +1731,20 @@ function renderBillList(bills){
       <div style="margin-top:4px;">
         <span class="badge ${b.paymentStatus==='Paid'?'badge-emerald':'badge-amber'}">${b.paymentStatus}</span>
       </div>
-      ${b.paymentStatus==='Pending'?`<button class="btn btn-sm" style="margin-top:4px;background:var(--emerald-50);color:var(--emerald-700);border:1px solid var(--emerald-100);" onclick="markPaid('${b.InvoiceID}')">✅ Mark Paid</button>`:''}
+      ${b.paymentStatus==='Pending'?`<button class="btn btn-sm" style="margin-top:4px;background:var(--emerald-50);color:var(--emerald-700);border:1px solid var(--emerald-100);" onclick="markPaid('${b.id}')">✅ Mark Paid</button>`:''}
     </div>
   </div>`).join('');
 }
 
 async function markPaid(id){
   const bills=getAll(KEYS.BILLING);
-  const idx=bills.findIndex(b=>b.InvoiceID===id);
+  const idx=bills.findIndex(b=>b.id===id);
   if(idx!==-1){
-    const updated={...bills[idx],paymentStatus:'Paid'};
-    await executeCrud(KEYS.BILLING,'EDIT',updated);
+    bills[idx].paymentStatus='Paid';
+    bills[idx].updatedAt=Date.now();
+    saveAll(KEYS.BILLING,bills);
     renderBilling();
+    await syncToGoogleSheets();
   }
 }
 
@@ -1551,7 +1800,7 @@ function renderMedList(medicines){
       <td style="padding:10px;text-align:center;"><span class="badge ${m.stock<=m.minStock?'badge-rose':'badge-emerald'}">${m.stock}</span></td>
       <td style="padding:10px;text-align:center;font-weight:700;">${fmt(m.price)}</td>
       <td style="padding:10px;text-align:center;">
-        <button class="btn btn-secondary btn-sm" onclick="showEditMed('${m.MedicineID}')">✏️</button>
+        <button class="btn btn-secondary btn-sm" onclick="showEditMed('${m.id}')">✏️</button>
       </td>
     </tr>`).join('')}
     </tbody>
@@ -1586,21 +1835,23 @@ async function saveMedicine(){
   const name=document.getElementById('am-name').value.trim();
   if(!name)return alert('Medicine name required!');
   const meds=getAll(KEYS.MEDICINES);
-  const med={
-    MedicineID:`MED-${(meds.length+1).toString().padStart(3,'0')}`,
+  meds.push({
+    id:`MED-${(meds.length+1).toString().padStart(3,'0')}`,
     name,potency:document.getElementById('am-potency').value,
     category:document.getElementById('am-cat').value,
     stock:parseInt(document.getElementById('am-stock').value)||0,
     minStock:parseInt(document.getElementById('am-min').value)||5,
     price:parseFloat(document.getElementById('am-price').value)||0,
-  };
+    updatedAt:Date.now()
+  });
+  saveAll(KEYS.MEDICINES,meds);
   closeModal();
-  await executeCrud(KEYS.MEDICINES,'SAVE',med);
   renderInventory();
+  await syncToGoogleSheets();
 }
 
 function showEditMed(id){
-  const m=getAll(KEYS.MEDICINES).find(x=>x.MedicineID===id);
+  const m=getAll(KEYS.MEDICINES).find(x=>x.id===id);
   if(!m)return;
   showModal(`
   <div class="modal-header">
@@ -1622,12 +1873,21 @@ function showEditMed(id){
 
 async function updateMed(id){
   const meds=getAll(KEYS.MEDICINES);
-  const idx=meds.findIndex(m=>m.MedicineID===id);
+  const idx=meds.findIndex(m=>m.id===id);
   if(idx===-1)return;
-  const updated={...meds[idx],name:document.getElementById('em-name').value,potency:document.getElementById('em-potency').value,stock:parseInt(document.getElementById('em-stock').value)||0,minStock:parseInt(document.getElementById('em-min').value)||5,price:parseFloat(document.getElementById('em-price').value)||0};
+  meds[idx]={
+    ...meds[idx],
+    name:document.getElementById('em-name').value,
+    potency:document.getElementById('em-potency').value,
+    stock:parseInt(document.getElementById('em-stock').value)||0,
+    minStock:parseInt(document.getElementById('em-min').value)||5,
+    price:parseFloat(document.getElementById('em-price').value)||0,
+    updatedAt:Date.now()
+  };
+  saveAll(KEYS.MEDICINES,meds);
   closeModal();
-  await executeCrud(KEYS.MEDICINES,'EDIT',updated);
   renderInventory();
+  await syncToGoogleSheets();
 }
 
 // ==================== APPOINTMENTS ====================
@@ -1675,7 +1935,7 @@ function renderApptList(appts){
     <div style="text-align:right;">
       <span class="badge ${a.status==='Completed'?'badge-emerald':a.status==='Cancelled'?'badge-rose':'badge-amber'}">${a.status}</span>
       <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end;">
-        ${a.status==='Scheduled'?`<button class="btn btn-primary btn-sm" onclick="updateApptStatus('${a.AppointmentID}','Completed')">✅</button><button class="btn btn-danger btn-sm" onclick="updateApptStatus('${a.AppointmentID}','Cancelled')">✕</button>`:''}
+        ${a.status==='Scheduled'?`<button class="btn btn-primary btn-sm" onclick="updateApptStatus('${a.id}','Completed')">✅</button><button class="btn btn-danger btn-sm" onclick="updateApptStatus('${a.id}','Cancelled')">✕</button>`:''}
       </div>
     </div>
   </div>`).join('');
@@ -1714,27 +1974,32 @@ async function saveAppt(){
   const pname=document.getElementById('na-pname').value.trim();
   const date=document.getElementById('na-date').value;
   if(!pname||!date)return alert('Name and date required!');
-  const appt={
-    AppointmentID:'APP-'+Date.now(),
+  const appts=getAll(KEYS.APPOINTMENTS);
+  appts.push({
+    id:'APP-'+Date.now(),
     patientName:pname.split('(')[0].trim(),
     mobile:document.getElementById('na-mobile').value,
     date,time:document.getElementById('na-time').value,
     type:document.getElementById('na-type').value,
     status:'Scheduled',
-    notes:document.getElementById('na-notes').value
-  };
+    notes:document.getElementById('na-notes').value,
+    updatedAt:Date.now()
+  });
+  saveAll(KEYS.APPOINTMENTS,appts);
   closeModal();
-  await executeCrud(KEYS.APPOINTMENTS,'SAVE',appt);
   renderAppointments();
+  await syncToGoogleSheets();
 }
 
 async function updateApptStatus(id,status){
   const appts=getAll(KEYS.APPOINTMENTS);
-  const idx=appts.findIndex(a=>a.AppointmentID===id);
+  const idx=appts.findIndex(a=>a.id===id);
   if(idx!==-1){
-    const updated={...appts[idx],status};
-    await executeCrud(KEYS.APPOINTMENTS,'EDIT',updated);
+    appts[idx].status=status;
+    appts[idx].updatedAt=Date.now();
+    saveAll(KEYS.APPOINTMENTS,appts);
     renderAppointments();
+    await syncToGoogleSheets();
   }
 }
 
@@ -1765,12 +2030,20 @@ function renderSettings(){
 
   <div class="card">
     <div style="font-size:14px;font-weight:800;color:var(--slate-700);margin-bottom:8px;">📊 Google Sheets Sync</div>
-    <div style="font-size:12px;color:var(--slate-500);margin-bottom:16px;">Auto-sync enabled. Data saves locally and syncs to Google Sheets automatically.</div>
-    <div class="form-group"><label class="label">Apps Script URL</label>
-      <input class="input" value="${WEB_APP_URL}" disabled style="background:var(--slate-100);color:var(--slate-500);font-family:monospace;font-size:10px;"/>
+    <div style="font-size:12px;color:var(--slate-500);margin-bottom:16px;">Data locally saves on this device. Enable sync to backup to Google Sheets automatically.</div>
+    <div class="form-group"><label class="label">Apps Script Web App URL</label>
+      <input class="input" id="cfg-syncurl" value="${sync.url||WEB_APP_URL}" placeholder="https://script.google.com/macros/s/.../exec"/>
     </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;">
+        <input type="checkbox" id="cfg-sync-enabled" ${sync.enabled?'checked':''} style="width:16px;height:16px;accent-color:var(--teal-600);"/>
+        Enable Auto Sync on Save
+      </label>
+    </div>
+    ${sync.lastSync?`<div class="alert alert-success" style="margin-bottom:12px;">✅ Last synced: ${sync.lastSync}</div>`:''}
     <div style="display:flex;gap:10px;">
-      <button class="btn btn-primary" onclick="manualSyncNow()">🔄 Sync Now</button>
+      <button class="btn btn-primary" onclick="saveSyncConfig()">💾 Save Sync Config</button>
+      <button class="btn btn-secondary" id="manual-sync-btn" onclick="manualSync()">🔄 Sync Now</button>
     </div>
   </div>
   `;
@@ -1783,27 +2056,30 @@ async function saveSettings(){
     doctorPin:document.getElementById('cfg-dpin').value||'1234',
     receptionistPin:document.getElementById('cfg-rpin').value||'4321',
     receptionistName:document.getElementById('cfg-rname').value,
+    updatedAt:Date.now()
   };
   ss(KEYS.SETTINGS,cfg);
   document.getElementById('sb-clinic-name').textContent=cfg.clinicName||'Clinic';
   alert('✅ Settings saved! New PINs active from next login.');
+  await syncToGoogleSheets();
 }
 
-function saveSyncConfig_unused(){
-  const sync={url:document.getElementById('cfg-syncurl').value,enabled:document.getElementById('cfg-sync-enabled').checked};
+function saveSyncConfig(){
+  const sync={
+    url:document.getElementById('cfg-syncurl').value,
+    enabled:document.getElementById('cfg-sync-enabled').checked
+  };
   ss(KEYS.SYNC,sync);
   updateSyncBadge();
   alert('✅ Sync config saved!');
 }
 
-async function manualSyncNow(){
-  if(!navigator.onLine){alert('⚠️ No internet connection!');return;}
-  try{
-    await syncToSheets();
-    await loadFromSheets();
-    alert('✅ Sync completed!');
-    renderSettings();
-  }catch(e){alert('⚠️ Sync failed: '+e.message);}
+async function manualSync(){
+  const btn = document.getElementById('manual-sync-btn');
+  if (btn) btn.disabled = true;
+  await loadFromGoogleSheets();
+  if (btn) btn.disabled = false;
+  alert('✅ Sync completed!');
 }
 
 // ==================== MODAL ====================
@@ -1816,15 +2092,28 @@ function showModal(html, extraClass=''){
 function closeModal(){document.getElementById('modal-container').innerHTML='';}
 function closeModalOverlay(e){if(e.target.classList.contains('modal-overlay'))closeModal();}
 
-// ==================== INIT ====================
-initDB();
-// Auto-login if session exists
-const savedUser=ls(KEYS.USER);
-if(savedUser){
-  currentUser=savedUser;
-  document.getElementById('login-screen').classList.add('hidden');
-  startApp();
+// ==================== INITIAL STARTUP ====================
+async function initAppStartup() {
+  initDB();
+  
+  // Immediately download latest data from Google Sheets on start (Requirement 3)
+  await loadFromGoogleSheets();
+  
+  // Hide loading screen and display proper UI after download completes
+  const loader = document.getElementById('loading-screen');
+  if (loader) loader.classList.add('hidden');
+  
+  const savedUser=ls(KEYS.USER);
+  if(savedUser){
+    currentUser=savedUser;
+    document.getElementById('login-screen').classList.add('hidden');
+    startApp();
+  } else {
+    document.getElementById('login-screen').classList.remove('hidden');
+  }
 }
+
+initAppStartup();
 </script>
 </body>
 </html>
