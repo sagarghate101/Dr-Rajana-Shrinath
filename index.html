@@ -936,7 +936,10 @@ function renderDashboard(){
     </div>
     <div class="stat-card" style="cursor:pointer;" onclick="navigate('queue')">
       <div class="stat-icon">🎫</div>
-      <div class="stat-value" style="color:var(--amber-600);">${getAll(KEYS.QUEUE).filter(q=>q.date===today()&&q.status==='Waiting').length}</div>
+      <div class="stat-value" style="color:var(--amber-600);">${getAll(KEYS.QUEUE).filter(q=>{
+        const qDate = q.date ? q.date.toString().split('T')[0] : '';
+        return qDate === today() && q.status==='Waiting';
+      }).length}</div>
       <div class="stat-label">Waiting in Queue</div>
     </div>
     <div class="stat-card" style="cursor:pointer;" onclick="navigate('courier')">
@@ -1024,13 +1027,17 @@ function renderDashboard(){
 function renderQueue() {
   // Today's appointments auto-add to queue if not already added
   const todayAppts = getAll(KEYS.APPOINTMENTS)
-    .filter(a => a.date === today() && a.status === 'Scheduled');
+    .filter(a => {
+      const aDate = a.date ? a.date.toString().split('T')[0] : '';
+      return aDate === today() && a.status === 'Scheduled';
+    });
   
   const existingQueue = getAll(KEYS.QUEUE);
   
   todayAppts.forEach(appt => {
     const alreadyInQueue = existingQueue
-      .some(q => q.appointmentId === appt.id && q.date === today());
+      .some(q => q.appointmentId === appt.id && 
+        (q.date ? q.date.toString().split('T')[0] : '') === today());
     
     if (!alreadyInQueue) {
       // Find patient by mobile
@@ -1038,7 +1045,10 @@ function renderQueue() {
         .find(p => p.mobile === appt.mobile || p.name === appt.patientName);
       
       const currentQueue = getAll(KEYS.QUEUE)
-        .filter(q => q.date === today());
+        .filter(q => {
+          const qDate = q.date ? q.date.toString().split('T')[0] : '';
+          return qDate === today();
+        });
       const nextToken = currentQueue.length > 0 
         ? Math.max(...currentQueue.map(q => q.token)) + 1 
         : 1;
@@ -1062,7 +1072,11 @@ function renderQueue() {
   });
 
   const patients = getAll(KEYS.PATIENTS);
-  const queue = getAll(KEYS.QUEUE).filter(q => q.date === today());
+  const todayStr = today();
+  const queue = getAll(KEYS.QUEUE).filter(q => {
+    const qDate = q.date ? q.date.toString().split('T')[0] : '';
+    return qDate === todayStr;
+  });
   const waiting = queue.filter(q => q.status === 'Waiting').length;
   const inConsult = queue.filter(q => q.status === 'In-Consultation').length;
   const done = queue.filter(q => q.status === 'Done').length;
