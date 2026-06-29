@@ -341,8 +341,6 @@ async function loadFromGoogleSheets() {
     const activeUrl = getSyncUrl();
     const res = await fetch(activeUrl + "?action=get_data", {
       method: "GET",
-      mode: "cors",
-      credentials: "include",
       headers: { "Accept": "application/json" }
     });
     if (!res.ok) throw new Error("GET response not ok");
@@ -496,9 +494,9 @@ async function loadFromGoogleSheets() {
         const localQueue = getAll(KEYS.QUEUE);
         const todayStr = today();
         const localToday = localQueue.filter(q => {
-          const qDate = new Date(q.date);
-          const ist = new Date(qDate.getTime() + (5.5 * 60 * 60 * 1000));
-          return ist.toISOString().split('T')[0] === todayStr;
+          if (!q.date) return false;
+          const qDateStr = q.date.toString().split('T')[0];
+          return qDateStr === todayStr;
         });
         const remoteIds = new Set(mappedQueue.map(q => q.id));
         const localOnly = localToday.filter(q => !remoteIds.has(q.id));
@@ -523,8 +521,6 @@ async function loadFromGoogleSheets() {
 
       const sync = ls(KEYS.SYNC) || { url: WEB_APP_URL, enabled: true };
       sync.lastSync = new Date().toLocaleString('en-IN');
-      sync.lastPull = new Date().toLocaleString('en-IN');
-      showToast('✅ Data pulled from cloud', 'success');
       ss(KEYS.SYNC, sync);
 
       isOffline = false;
@@ -561,8 +557,6 @@ async function syncToGoogleSheets() {
     try {
       const res = await fetch(activeUrl + "?action=get_data", {
         method: "GET",
-        mode: "cors",
-        credentials: "include",
         headers: { "Accept": "application/json" }
       });
       if (res.ok) {
@@ -731,22 +725,13 @@ async function syncToGoogleSheets() {
       queue: getAll(KEYS.QUEUE)
     };
 
-    // 3. Upload merged data using CORS to receive response
-    const uploadResponse = await fetch(activeUrl, {
+    // 3. Upload merged data
+    await fetch(activeUrl, {
       method: 'POST',
-      mode: 'cors',                // ✅ CORS enabled
-      credentials: 'include',      // ✅ Send cookies if needed
+      mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text();
-      throw new Error(`Upload failed (${uploadResponse.status}): ${errorText}`);
-    }
-
-    const uploadResult = await uploadResponse.json();
-    console.log('Upload successful:', uploadResult);
 
     isOffline = false;
     document.getElementById('offline-badge').classList.add('hidden');
@@ -757,7 +742,6 @@ async function syncToGoogleSheets() {
     console.warn("Synchronization failed:", err);
     isOffline = true;
     document.getElementById('offline-badge').classList.remove('hidden');
-    throw err; // Re-throw to let caller handle
   }
 }
 
@@ -778,16 +762,6 @@ window.addEventListener('online', async () => {
 window.addEventListener('offline', () => {
   isOffline = true;
   document.getElementById('offline-badge').classList.remove('hidden');
-});
-
-// Auto-sync when user returns to the tab (PC/Mobile switch)
-document.addEventListener('visibilitychange', async () => {
-  if (!document.hidden) {
-    console.log('Tab focused - syncing...');
-    await loadFromGoogleSheets();
-    if (activeTab && currentUser) renderView(); // Refresh current view
-    updateSyncBadge();
-  }
 });
 
 // Auto-refresh interval (30 seconds)
@@ -902,33 +876,13 @@ function startApp(){
   buildNav();
   renderView();
   updateSyncBadge();
-  // ✅ FORCE SYNC ON LOGIN - Pull latest data from Sheets
-  (async function() {
-    await loadFromGoogleSheets();
-    if (currentUser) {
-      renderView(); // Re-render with fresh data
-      updateSyncBadge();
-    }
-  })();
 }
 
 function updateSyncBadge(){
   const cfg=ls(KEYS.SYNC)||{};
   const el=document.getElementById('sync-badge');
-  if(cfg.enabled && cfg.lastPull){
-    el.textContent='📡 Pull: '+cfg.lastPull;
-    el.style.display='';
-    el.style.fontSize='9px';
-    el.style.padding='2px 8px';
-    el.style.borderRadius='12px';
-    el.style.background='var(--teal-50)';
-    el.style.color='var(--teal-700)';
-  } else if(cfg.enabled && cfg.lastSync){
-    el.textContent='Synced: '+cfg.lastSync;
-    el.style.display='';
-  } else {
-    el.style.display='none';
-  }
+  if(cfg.enabled&&cfg.lastSync){el.textContent='Synced: '+cfg.lastSync;el.style.display='';}
+  else el.style.display='none';
 }
 
 function renderView(){
@@ -950,7 +904,12 @@ function renderView(){
 
 // ==================== HELPERS ====================
 function fmt(n){return'₹'+(n||0).toLocaleString('en-IN');}
-function today(){return new Date().toISOString().split('T')[0];}
+function today() {
+  const d = new Date();
+  const utc = d.getTime() + (d.getTimezoneOffset() * 60 * 1000);
+  const ist = new Date(utc + (330 * 60000)); // 330 mins offset for Asia/Kolkata (IST)
+  return ist.toISOString().split('T')[0];
+}
 function fmtDate(d){if(!d)return'-';const dt=new Date(d);return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});}
 function genId(prefix,list){return`${prefix}-${(list.length+1).toString().padStart(4,'0')}`;}
 function patientInitials(name){return name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);}
@@ -1091,6 +1050,7 @@ function renderQueue() {
     });
   
   const existingQueue = getAll(KEYS.QUEUE);
+  let addedAny = false;
   
   todayAppts.forEach(appt => {
     const alreadyInQueue = existingQueue
@@ -1126,8 +1086,13 @@ function renderQueue() {
         isAppointment: true
       });
       saveAll(KEYS.QUEUE, allQueue);
+      addedAny = true;
     }
   });
+
+  if (addedAny) {
+    syncToGoogleSheets();
+  }
 
   const patients = getAll(KEYS.PATIENTS);
   const todayStr = today();
@@ -1309,19 +1274,7 @@ async function saveToQueue(token) {
   saveAll(KEYS.QUEUE, queue);
   closeModal();
   renderQueue();
-  
-  // ✅ Show uploading status
-  const btn = document.querySelector('#modal-container .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Syncing...'; }
-  
-  try {
-    await syncToGoogleSheets();
-    showToast('✅ Patient added & synced to Google Sheets!', 'success');
-  } catch (err) {
-    showToast('⚠️ Saved locally, but sync failed. Will retry later.', 'error');
-    console.error('Sync error:', err);
-  }
-  if (btn) { btn.disabled = false; btn.textContent = '🎫 Add Token ' + token; }
+  await syncToGoogleSheets();
 }
 
 async function startQueueConsult(qid, pid) {
@@ -2889,12 +2842,10 @@ function renderSettings(){
         Enable Auto Sync on Save
       </label>
     </div>
-    ${sync.lastSync?`<div class="alert alert-success" style="margin-bottom:12px;">✅ Last uploaded: ${sync.lastSync}</div>`:''}
-    <div id="last-pull-status" class="alert alert-success ${sync.lastPull?'':'hidden'}" style="margin-bottom:12px;">⬇️ Last pulled: ${sync.lastPull || 'Never'}</div>
+    ${sync.lastSync?`<div class="alert alert-success" style="margin-bottom:12px;">✅ Last synced: ${sync.lastSync}</div>`:''}
     <div style="display:flex;gap:10px;">
       <button class="btn btn-primary" onclick="saveSyncConfig()">💾 Save Sync Config</button>
-      <button class="btn btn-secondary" id="manual-sync-btn" onclick="manualSync()">⬆️ Upload & Sync</button>
-      <button class="btn btn-secondary" style="margin-left:8px;background:var(--teal-50);color:var(--teal-700);border-color:var(--teal-200);" onclick="manualPull()">⬇️ Pull from Cloud</button>
+      <button class="btn btn-secondary" id="manual-sync-btn" onclick="manualSync()">🔄 Sync Now</button>
     </div>
   </div>
   `;
@@ -2933,16 +2884,6 @@ async function manualSync(){
   alert('✅ Sync completed!');
 }
 
-async function manualPull() {
-  const btn = document.getElementById('manual-sync-btn');
-  if (btn) btn.disabled = true;
-  await loadFromGoogleSheets();
-  renderView();
-  updateSyncBadge();
-  if (btn) btn.disabled = false;
-  alert('✅ Data pulled from Google Sheets successfully!');
-}
-
 // ==================== MODAL ====================
 function showModal(html, extraClass=''){
   document.getElementById('modal-container').innerHTML=`
@@ -2972,30 +2913,6 @@ async function initAppStartup() {
   } else {
     document.getElementById('login-screen').classList.remove('hidden');
   }
-}
-
-// Show a temporary toast message
-function showToast(msg, type='success') {
-  const existing = document.querySelector('.toast-notification');
-  if (existing) existing.remove();
-  const toast = document.createElement('div');
-  toast.className = 'toast-notification';
-  toast.style.cssText = `
-    position: fixed; bottom: 20px; right: 20px; 
-    padding: 12px 20px; border-radius: 12px; 
-    font-weight: 700; font-size: 13px;
-    background: ${type === 'success' ? 'var(--teal-600)' : 'var(--rose-600)'};
-    color: white; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-    z-index: 9999; transition: all 0.3s ease;
-    max-width: 320px;
-  `;
-  toast.textContent = msg;
-  document.body.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateY(20px)';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
 }
 
 initAppStartup();
