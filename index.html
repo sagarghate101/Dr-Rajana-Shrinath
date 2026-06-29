@@ -489,7 +489,19 @@ async function loadFromGoogleSheets() {
                          (q.IsAppointment || q.isAppointment) === true,
           updatedAt: q.updatedAt || Date.now()
         }));
-        saveAll(KEYS.QUEUE, mappedQueue);
+        
+        // Merge: local today's entries + remote entries
+        const localQueue = getAll(KEYS.QUEUE);
+        const todayStr = today();
+        const localToday = localQueue.filter(q => {
+          const qDate = new Date(q.date);
+          const ist = new Date(qDate.getTime() + (5.5 * 60 * 60 * 1000));
+          return ist.toISOString().split('T')[0] === todayStr;
+        });
+        const remoteIds = new Set(mappedQueue.map(q => q.id));
+        const localOnly = localToday.filter(q => !remoteIds.has(q.id));
+        const merged = [...mappedQueue, ...localOnly];
+        saveAll(KEYS.QUEUE, merged);
       }
 
       // Decode Medicines
