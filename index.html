@@ -305,6 +305,7 @@ const DEFAULT_MEDICINES=[
 
 // ==================== SYNCHRONIZATION ENGINE ====================
 let isOffline = false;
+let isSyncing = false;
 
 // Merge list of items. Item with higher updatedAt wins.
 function mergeLists(localList, remoteList) {
@@ -474,28 +475,34 @@ async function loadFromGoogleSheets() {
 
       // Decode Queue
       if (Array.isArray(data.queue)) {
-        const mappedQueue = data.queue.map(q => ({
-          id: q.QueueID || q.id || '',
-          token: parseInt(q.Token || q.token) || 0,
-          patientId: q.PatientID || q.patientId || '',
-          patientName: q.PatientName || q.patientName || '',
-          mobile: String(q.Mobile || q.mobile || ''),
-          date: q.Date || q.date || '',
-          addedTime: q.AddedTime || q.addedTime || '',
-          type: q.Type || q.type || '',
-          status: q.Status || q.status || '',
-          appointmentId: q.AppointmentID || q.appointmentId || '',
-          isAppointment: (q.IsAppointment || q.isAppointment) === 'YES' || 
-                         (q.IsAppointment || q.isAppointment) === true,
-          updatedAt: q.updatedAt || Date.now()
-        }));
+        const mappedQueue = data.queue.map(q => {
+          let qDate = q.Date || q.date || '';
+          if (qDate) {
+            qDate = qDate.toString().split('T')[0].split(' ')[0];
+          }
+          return {
+            id: q.QueueID || q.id || '',
+            token: parseInt(q.Token || q.token) || 0,
+            patientId: q.PatientID || q.patientId || '',
+            patientName: q.PatientName || q.patientName || '',
+            mobile: String(q.Mobile || q.mobile || ''),
+            date: qDate,
+            addedTime: q.AddedTime || q.addedTime || '',
+            type: q.Type || q.type || '',
+            status: q.Status || q.status || '',
+            appointmentId: q.AppointmentID || q.appointmentId || '',
+            isAppointment: (q.IsAppointment || q.isAppointment) === 'YES' || 
+                           (q.IsAppointment || q.isAppointment) === true,
+            updatedAt: q.updatedAt || Date.now()
+          };
+        });
         
         // Merge: local today's entries + remote entries
         const localQueue = getAll(KEYS.QUEUE);
         const todayStr = today();
         const localToday = localQueue.filter(q => {
           if (!q.date) return false;
-          const qDateStr = q.date.toString().split('T')[0];
+          const qDateStr = q.date.toString().split('T')[0].split(' ')[0];
           return qDateStr === todayStr;
         });
         const remoteIds = new Set(mappedQueue.map(q => q.id));
@@ -680,21 +687,27 @@ async function syncToGoogleSheets() {
         updatedAt: m.updatedAt || Date.now()
       }));
 
-      const remoteQueueMapped = (remoteData.queue || []).map(q => ({
-        id: q.QueueID || q.id || '',
-        token: parseInt(q.Token || q.token) || 0,
-        patientId: q.PatientID || q.patientId || '',
-        patientName: q.PatientName || q.patientName || '',
-        mobile: String(q.Mobile || q.mobile || ''),
-        date: q.Date || q.date || '',
-        addedTime: q.AddedTime || q.addedTime || '',
-        type: q.Type || q.type || '',
-        status: q.Status || q.status || '',
-        appointmentId: q.AppointmentID || q.appointmentId || '',
-        isAppointment: (q.IsAppointment || q.isAppointment) === 'YES' || 
-                       (q.IsAppointment || q.isAppointment) === true,
-        updatedAt: q.updatedAt || Date.now()
-      }));
+      const remoteQueueMapped = (remoteData.queue || []).map(q => {
+        let qDate = q.Date || q.date || '';
+        if (qDate) {
+          qDate = qDate.toString().split('T')[0].split(' ')[0];
+        }
+        return {
+          id: q.QueueID || q.id || '',
+          token: parseInt(q.Token || q.token) || 0,
+          patientId: q.PatientID || q.patientId || '',
+          patientName: q.PatientName || q.patientName || '',
+          mobile: String(q.Mobile || q.mobile || ''),
+          date: qDate,
+          addedTime: q.AddedTime || q.addedTime || '',
+          type: q.Type || q.type || '',
+          status: q.Status || q.status || '',
+          appointmentId: q.AppointmentID || q.appointmentId || '',
+          isAppointment: (q.IsAppointment || q.isAppointment) === 'YES' || 
+                         (q.IsAppointment || q.isAppointment) === true,
+          updatedAt: q.updatedAt || Date.now()
+        };
+      });
 
       const mergedPatients = mergeLists(getAll(KEYS.PATIENTS), remotePatientsMapped);
       const mergedCases = mergeLists(getAll(KEYS.CASES), remoteCasesMapped);
@@ -1274,7 +1287,13 @@ async function saveToQueue(token) {
   saveAll(KEYS.QUEUE, queue);
   closeModal();
   renderQueue();
-  await syncToGoogleSheets();
+  
+  try {
+    await syncToGoogleSheets();
+  } catch (err) {
+    console.error('Failed to sync queue addition to Google Sheets:', err);
+    alert('⚠️ Queue item added locally, but failed to sync to Google Sheets. Will retry in the background.');
+  }
 }
 
 async function startQueueConsult(qid, pid) {
