@@ -744,6 +744,7 @@ async function syncToGoogleSheets() {
     console.warn("Synchronization failed:", err);
     isOffline = true;
     document.getElementById('offline-badge').classList.remove('hidden');
+    throw err; // Re-throw to let caller handle
   }
 }
 
@@ -1293,7 +1294,19 @@ async function saveToQueue(token) {
   saveAll(KEYS.QUEUE, queue);
   closeModal();
   renderQueue();
-  await syncToGoogleSheets();
+  
+  // ✅ Show uploading status
+  const btn = document.querySelector('#modal-container .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Syncing...'; }
+  
+  try {
+    await syncToGoogleSheets();
+    showToast('✅ Patient added & synced to Google Sheets!', 'success');
+  } catch (err) {
+    showToast('⚠️ Saved locally, but sync failed. Will retry later.', 'error');
+    console.error('Sync error:', err);
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '🎫 Add Token ' + token; }
 }
 
 async function startQueueConsult(qid, pid) {
