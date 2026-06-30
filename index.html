@@ -1205,7 +1205,7 @@ async function addAppointmentToQueueOnSheets(newQItem) {
     const activeUrl = getSyncUrl();
     await fetch(activeUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "add_record",
         sheet: "QUEUE",
@@ -1395,7 +1395,7 @@ async function saveToQueue(token) {
     const activeUrl = getSyncUrl();
     const res = await fetch(activeUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "add_record",
         sheet: "QUEUE",
@@ -1429,7 +1429,7 @@ async function startQueueConsult(qid, pid) {
     const activeUrl = getSyncUrl();
     const res = await fetch(activeUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "update_record",
         sheet: "QUEUE",
@@ -1465,7 +1465,7 @@ async function markQueueDone(qid) {
     const activeUrl = getSyncUrl();
     const res = await fetch(activeUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "update_record",
         sheet: "QUEUE",
@@ -1500,7 +1500,7 @@ async function removeFromQueue(qid) {
     const activeUrl = getSyncUrl();
     const res = await fetch(activeUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "delete_record",
         sheet: "QUEUE",
