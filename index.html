@@ -303,285 +303,53 @@ const DEFAULT_MEDICINES=[
   {id:'MED-015',name:'Thuja',potency:'1M',stock:3,minStock:2,category:'Dilution',price:210},
 ];
 
-// ==================== SYNCHRONIZATION ENGINE ====================
+// ==================== LIVE FETCH ENGINE (SHEETS AS ONLY SOURCE OF TRUTH) ====================
+let g_data = {
+  patients: [],
+  cases: [],
+  prescriptions: [],
+  couriers: [],
+  billing: [],
+  appointments: [],
+  queue: [],
+  medicines: []
+};
+
 let isOffline = false;
 let isSyncing = false;
-
-// Merge list of items. Item with higher updatedAt wins.
-function mergeLists(localList, remoteList) {
-  const mergedMap = new Map();
-  // First load all remote items
-  remoteList.forEach(item => {
-    if (item && item.id) mergedMap.set(item.id, item);
-  });
-  // Then merge local items
-  localList.forEach(item => {
-    if (item && item.id) {
-      const existing = mergedMap.get(item.id);
-      if (!existing) {
-        mergedMap.set(item.id, item);
-      } else {
-        const localTime = item.updatedAt || 0;
-        const remoteTime = existing.updatedAt || 0;
-        if (localTime >= remoteTime) {
-          mergedMap.set(item.id, item);
-        }
-      }
-    }
-  });
-  return Array.from(mergedMap.values());
-}
 
 function getSyncUrl() {
   const sync = ls(KEYS.SYNC);
   return (sync && sync.url) || WEB_APP_URL;
 }
 
-async function loadFromGoogleSheets() {
+async function fetchFreshData(silent = false) {
+  const syncBadge = document.getElementById('sync-badge');
+  const syncStatus = document.getElementById('sync-status');
+  
+  if (!silent) {
+    if (syncBadge) {
+      syncBadge.classList.add('animate-pulse');
+      syncBadge.style.color = '#e11d48'; // red pulse while fetching
+    }
+    if (syncStatus) {
+      syncStatus.textContent = 'Updating...';
+    }
+  }
+
   try {
     const activeUrl = getSyncUrl();
     const res = await fetch(activeUrl + "?action=get_data", {
       method: "GET",
       headers: { "Accept": "application/json" }
     });
-    if (!res.ok) throw new Error("GET response not ok");
-    const data = await res.json();
-    if (data && data.success !== false) {
-      // Decode Prescriptions first so they can be attached to cases
-      let mappedPrescriptions = [];
-      if (Array.isArray(data.prescriptions)) {
-        mappedPrescriptions = data.prescriptions.map(rx => ({
-          caseId: rx.CaseID || rx.caseId || '',
-          patientId: rx.PatientID || rx.patientId || '',
-          name: rx.MedicineName || rx.name || '',
-          potency: rx.Potency || rx.potency || '',
-          dosage: rx.Dosage || rx.dosage || '',
-          duration: rx.Duration || rx.duration || ''
-        }));
-        saveAll(KEYS.PRESCRIPTIONS, mappedPrescriptions);
-      }
-
-      // Decode Patients (Google Sheet PatientID/Name -> frontend id/name)
-      if (Array.isArray(data.patients)) {
-        const mappedPatients = data.patients.map(p => ({
-          id: p.PatientID || p.id || '',
-          name: p.Name || p.name || '',
-          mobile: String(p.Mobile || p.mobile || ''),
-          age: parseInt(p.Age || p.age) || 0,
-          gender: p.Gender || p.gender || '',
-          address: p.Address || p.address || '',
-          occupation: p.Occupation || p.occupation || '',
-          bloodGroup: p.BloodGroup || p.bloodGroup || '',
-          createdAt: p.CreatedAt || p.createdAt || '',
-          updatedAt: p.updatedAt || Date.now()
-        }));
-        saveAll(KEYS.PATIENTS, mappedPatients);
-      }
-
-      // Decode Cases and rebuild the prescriptions sub-array using Prescriptions sheet
-      if (Array.isArray(data.cases)) {
-        const mappedCases = data.cases.map(c => {
-          const cid = c.CaseID || c.id || '';
-          const rxs = mappedPrescriptions.filter(r => r.caseId === cid).map(r => ({
-            name: r.name,
-            potency: r.potency,
-            dosage: r.dosage,
-            duration: r.duration
-          }));
-          return {
-            id: cid,
-            patientId: c.PatientID || c.patientId || '',
-            date: c.Date || c.date || '',
-            visitType: c.VisitType || c.visitType || '',
-            complaint: c.Complaint || c.complaint || '',
-            duration: c.Duration || c.duration || '',
-            notes: c.Notes || c.notes || '',
-            followUpDate: c.FollowUpDate || c.followUpDate || '',
-            fee: parseFloat(c.Fee || c.fee) || 0,
-            medCharge: parseFloat(c.MedCharge || c.medCharge) || 0,
-            courierCharge: parseFloat(c.CourierCharge || c.courierCharge) || 0,
-            payStatus: c.PayStatus || c.payStatus || '',
-            payMode: c.PayMode || c.payMode || '',
-            prescriptions: rxs.length > 0 ? rxs : (c.prescriptions || []),
-            visitDate: c.VisitDate || c.visitDate || c.Date || c.date || '',
-            visitTime: c.VisitTime || c.visitTime || '',
-            chiefComplaint: c.ChiefComplaint || c.chiefComplaint || c.Complaint || c.complaint || '',
-            symptoms: c.Symptoms || c.symptoms || '',
-            diagnosis: c.Diagnosis || c.diagnosis || '',
-            clinicalNotes: c.ClinicalNotes || c.clinicalNotes || c.Notes || c.notes || '',
-            prescriptionSummary: c.PrescriptionSummary || c.prescriptionSummary || '',
-            followUpDays: parseInt(c.FollowUpDays || c.followUpDays) || 0,
-            doctorName: c.DoctorName || c.doctorName || '',
-            createdAt: c.CreatedAt || c.createdAt || '',
-            updatedAt: c.updatedAt || Date.now()
-          };
-        });
-        saveAll(KEYS.CASES, mappedCases);
-      }
-
-      // Decode Couriers
-      if (Array.isArray(data.couriers)) {
-        const mappedCouriers = data.couriers.map(co => ({
-          id: co.CourierID || co.id || '',
-          patientId: co.PatientID || co.patientId || '',
-          patientName: co.PatientName || co.patientName || '',
-          mobile: String(co.Mobile || co.mobile || ''),
-          address: co.Address || co.address || '',
-          caseId: co.CaseID || co.caseId || '',
-          status: co.Status || co.status || '',
-          carrier: co.Carrier || co.carrier || '',
-          tracking: co.Tracking || co.tracking || '',
-          dispatchDate: co.DispatchDate || co.dispatchDate || '',
-          deliveryDate: co.DeliveryDate || co.deliveryDate || '',
-          createdAt: co.CreatedAt || co.createdAt || '',
-          updatedAt: co.updatedAt || Date.now()
-        }));
-        saveAll(KEYS.COURIERS, mappedCouriers);
-      }
-
-      // Decode Billing
-      if (Array.isArray(data.billing)) {
-        const mappedBilling = data.billing.map(b => ({
-          id: b.InvoiceID || b.id || '',
-          patientId: b.PatientID || b.patientId || '',
-          patientName: b.PatientName || b.patientName || '',
-          date: b.Date || b.date || '',
-          consultFee: parseFloat(b.ConsultFee || b.consultFee) || 0,
-          medCharge: parseFloat(b.MedCharge || b.medCharge) || 0,
-          courierCharge: parseFloat(b.CourierCharge || b.courierCharge) || 0,
-          total: parseFloat(b.Total || b.total) || 0,
-          payMode: b.PayMode || b.payMode || '',
-          paymentStatus: b.PaymentStatus || b.paymentStatus || '',
-          updatedAt: b.updatedAt || Date.now()
-        }));
-        saveAll(KEYS.BILLING, mappedBilling);
-      }
-
-      // Decode Appointments
-      if (Array.isArray(data.appointments)) {
-        const mappedAppointments = data.appointments.map(a => ({
-          id: a.AppointmentID || a.id || '',
-          patientName: a.PatientName || a.patientName || '',
-          mobile: String(a.Mobile || a.mobile || ''),
-          date: a.Date || a.date || '',
-          time: a.Time || a.time || '',
-          type: a.Type || a.type || '',
-          status: a.Status || a.status || '',
-          notes: a.Notes || a.notes || '',
-          updatedAt: a.updatedAt || Date.now()
-        }));
-        saveAll(KEYS.APPOINTMENTS, mappedAppointments);
-      }
-
-      // Decode Queue
-      if (Array.isArray(data.queue)) {
-        const mappedQueue = data.queue.map(q => {
-          let qDate = q.Date || q.date || '';
-          if (qDate) {
-            qDate = qDate.toString().split('T')[0].split(' ')[0];
-          }
-          return {
-            id: q.QueueID || q.id || '',
-            token: parseInt(q.Token || q.token) || 0,
-            patientId: q.PatientID || q.patientId || '',
-            patientName: q.PatientName || q.patientName || '',
-            mobile: String(q.Mobile || q.mobile || ''),
-            date: qDate,
-            addedTime: q.AddedTime || q.addedTime || '',
-            type: q.Type || q.type || '',
-            status: q.Status || q.status || '',
-            appointmentId: q.AppointmentID || q.appointmentId || '',
-            isAppointment: (q.IsAppointment || q.isAppointment) === 'YES' || 
-                           (q.IsAppointment || q.isAppointment) === true,
-            updatedAt: q.updatedAt || Date.now()
-          };
-        });
-        
-        // Merge: local today's entries + remote entries
-        const localQueue = getAll(KEYS.QUEUE);
-        const todayStr = today();
-        const localToday = localQueue.filter(q => {
-          if (!q.date) return false;
-          const qDateStr = q.date.toString().split('T')[0].split(' ')[0];
-          return qDateStr === todayStr;
-        });
-        const remoteIds = new Set(mappedQueue.map(q => q.id));
-        const localOnly = localToday.filter(q => !remoteIds.has(q.id));
-        const merged = [...mappedQueue, ...localOnly];
-        saveAll(KEYS.QUEUE, merged);
-
-        // Update in-memory currentQueueData
-        currentQueueData = merged.filter(q => q.date === todayStr);
-        if (activeTab === 'queue') {
-          renderQueueList(currentQueueData);
-        }
-      }
-
-      // Decode Medicines
-      if (Array.isArray(data.medicines)) {
-        const mappedMedicines = data.medicines.map(m => ({
-          id: m.MedicineID || m.id || '',
-          name: m.Name || m.name || '',
-          potency: m.Potency || m.potency || '',
-          category: m.Category || m.category || '',
-          stock: parseInt(m.Stock || m.stock) || 0,
-          minStock: parseInt(m.MinStock || m.minStock) || 0,
-          price: parseFloat(m.Price || m.price) || 0,
-          updatedAt: m.updatedAt || Date.now()
-        }));
-        saveAll(KEYS.MEDICINES, mappedMedicines);
-      }
-
-      const sync = ls(KEYS.SYNC) || { url: WEB_APP_URL, enabled: true };
-      sync.lastSync = new Date().toLocaleString('en-IN');
-      ss(KEYS.SYNC, sync);
-
-      isOffline = false;
-      document.getElementById('offline-badge').classList.add('hidden');
-      updateSyncBadge();
-    }
-  } catch (err) {
-    console.warn("Offline or error loading from Google Sheets:", err);
-    isOffline = true;
-    document.getElementById('offline-badge').classList.remove('hidden');
-  }
-
-  // Refresh current state
-  if (currentUser) {
-    buildNav();
-    const isTyping = document.activeElement && 
-      (document.activeElement.tagName === 'INPUT' || 
-       document.activeElement.tagName === 'TEXTAREA' || 
-       document.activeElement.tagName === 'SELECT');
-    if (activeTab !== 'consult' && !isTyping) {
-      renderView();
-    }
-  } else {
-    const cfg = ls(KEYS.SETTINGS) || {};
-    document.getElementById('clinic-name-display').textContent = cfg.clinicName || 'Homeopathy Clinic';
-  }
-}
-
-async function syncToGoogleSheets() {
-  try {
-    const activeUrl = getSyncUrl();
-    // 1. Download latest data to avoid overwriting stale data (Download -> Merge -> Upload -> Reload)
-    let remoteData = null;
-    try {
-      const res = await fetch(activeUrl + "?action=get_data", {
-        method: "GET",
-        headers: { "Accept": "application/json" }
-      });
-      if (res.ok) {
-        remoteData = await res.json();
-      }
-    } catch (e) {
-      console.warn("Could not retrieve remote data for merge. Syncing direct local state.", e);
-    }
-
+    
+    if (!res.ok) throw new Error("Server returned non-200 status");
+    const remoteData = await res.json();
+    
     if (remoteData) {
-      // Map remoteData to camelCase first before merging to ensure IDs match correctly!
-      const remotePrescriptionsMapped = (remoteData.prescriptions || []).map(rx => ({
+      // Decode Prescriptions first so they can be attached to cases
+      g_data.prescriptions = (remoteData.prescriptions || []).map(rx => ({
         caseId: rx.CaseID || rx.caseId || '',
         patientId: rx.PatientID || rx.patientId || '',
         name: rx.MedicineName || rx.name || '',
@@ -590,7 +358,8 @@ async function syncToGoogleSheets() {
         duration: rx.Duration || rx.duration || ''
       }));
 
-      const remotePatientsMapped = (remoteData.patients || []).map(p => ({
+      // Decode Patients (Google Sheet PatientID/Name -> frontend id/name)
+      g_data.patients = (remoteData.patients || []).map(p => ({
         id: p.PatientID || p.id || '',
         name: p.Name || p.name || '',
         mobile: String(p.Mobile || p.mobile || ''),
@@ -603,9 +372,10 @@ async function syncToGoogleSheets() {
         updatedAt: p.updatedAt || Date.now()
       }));
 
-      const remoteCasesMapped = (remoteData.cases || []).map(c => {
+      // Decode Cases and rebuild the prescriptions sub-array using Prescriptions sheet
+      g_data.cases = (remoteData.cases || []).map(c => {
         const cid = c.CaseID || c.id || '';
-        const rxs = remotePrescriptionsMapped.filter(r => r.caseId === cid).map(r => ({
+        const rxs = g_data.prescriptions.filter(r => r.caseId === cid).map(r => ({
           name: r.name,
           potency: r.potency,
           dosage: r.dosage,
@@ -640,7 +410,8 @@ async function syncToGoogleSheets() {
         };
       });
 
-      const remoteCouriersMapped = (remoteData.couriers || []).map(co => ({
+      // Decode Couriers
+      g_data.couriers = (remoteData.couriers || []).map(co => ({
         id: co.CourierID || co.id || '',
         patientId: co.PatientID || co.patientId || '',
         patientName: co.PatientName || co.patientName || '',
@@ -656,7 +427,8 @@ async function syncToGoogleSheets() {
         updatedAt: co.updatedAt || Date.now()
       }));
 
-      const remoteBillingMapped = (remoteData.billing || []).map(b => ({
+      // Decode Billing
+      g_data.billing = (remoteData.billing || []).map(b => ({
         id: b.InvoiceID || b.id || '',
         patientId: b.PatientID || b.patientId || '',
         patientName: b.PatientName || b.patientName || '',
@@ -670,7 +442,8 @@ async function syncToGoogleSheets() {
         updatedAt: b.updatedAt || Date.now()
       }));
 
-      const remoteAppointmentsMapped = (remoteData.appointments || []).map(a => ({
+      // Decode Appointments
+      g_data.appointments = (remoteData.appointments || []).map(a => ({
         id: a.AppointmentID || a.id || '',
         patientName: a.PatientName || a.patientName || '',
         mobile: String(a.Mobile || a.mobile || ''),
@@ -682,7 +455,8 @@ async function syncToGoogleSheets() {
         updatedAt: a.updatedAt || Date.now()
       }));
 
-      const remoteMedicinesMapped = (remoteData.medicines || []).map(m => ({
+      // Decode Medicines
+      g_data.medicines = (remoteData.medicines || []).map(m => ({
         id: m.MedicineID || m.id || '',
         name: m.Name || m.name || '',
         potency: m.Potency || m.potency || '',
@@ -693,7 +467,8 @@ async function syncToGoogleSheets() {
         updatedAt: m.updatedAt || Date.now()
       }));
 
-      const remoteQueueMapped = (remoteData.queue || []).map(q => {
+      // Decode Queue
+      g_data.queue = (remoteData.queue || []).map(q => {
         let qDate = q.Date || q.date || '';
         if (qDate) {
           qDate = qDate.toString().split('T')[0].split(' ')[0];
@@ -715,80 +490,70 @@ async function syncToGoogleSheets() {
         };
       });
 
-      const mergedPatients = mergeLists(getAll(KEYS.PATIENTS), remotePatientsMapped);
-      const mergedCases = mergeLists(getAll(KEYS.CASES), remoteCasesMapped);
-      const mergedCouriers = mergeLists(getAll(KEYS.COURIERS), remoteCouriersMapped);
-      const mergedBilling = mergeLists(getAll(KEYS.BILLING), remoteBillingMapped);
-      const mergedAppointments = mergeLists(getAll(KEYS.APPOINTMENTS), remoteAppointmentsMapped);
-      const mergedMedicines = mergeLists(getAll(KEYS.MEDICINES), remoteMedicinesMapped);
-      const mergedQueue = mergeLists(getAll(KEYS.QUEUE), remoteQueueMapped);
-
-      saveAll(KEYS.PATIENTS, mergedPatients);
-      saveAll(KEYS.CASES, mergedCases);
-      saveAll(KEYS.COURIERS, mergedCouriers);
-      saveAll(KEYS.BILLING, mergedBilling);
-      saveAll(KEYS.APPOINTMENTS, mergedAppointments);
-      saveAll(KEYS.MEDICINES, mergedMedicines);
-      saveAll(KEYS.QUEUE, mergedQueue);
+      const sync = ls(KEYS.SYNC) || { url: WEB_APP_URL, enabled: true };
+      sync.lastSync = new Date().toLocaleString('en-IN');
+      ss(KEYS.SYNC, sync);
     }
 
-    // 2. Prepare payload (always in camelCase, matching Apps Script expectations)
-    const payload = {
-      action: "sync_all",
-      patients: getAll(KEYS.PATIENTS),
-      cases: getAll(KEYS.CASES),
-      couriers: getAll(KEYS.COURIERS),
-      billing: getAll(KEYS.BILLING),
-      appointments: getAll(KEYS.APPOINTMENTS),
-      medicines: getAll(KEYS.MEDICINES),
-      queue: getAll(KEYS.QUEUE)
-    };
-
-    // 3. Upload merged data
-    await fetch(activeUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
     isOffline = false;
-    document.getElementById('offline-badge').classList.add('hidden');
-
-    // 4. Reload latest from sheets
-    await loadFromGoogleSheets();
+    const badgeEl = document.getElementById('offline-badge');
+    if (badgeEl) badgeEl.classList.add('hidden');
+    
+    if (syncStatus) {
+      const d = new Date();
+      syncStatus.textContent = 'Synced: ' + d.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
+    }
   } catch (err) {
-    console.warn("Synchronization failed:", err);
+    console.warn("Offline or error fetching from Google Sheets:", err);
     isOffline = true;
-    document.getElementById('offline-badge').classList.remove('hidden');
+    const badgeEl = document.getElementById('offline-badge');
+    if (badgeEl) badgeEl.classList.remove('hidden');
+    if (syncStatus) syncStatus.textContent = 'Offline';
+  } finally {
+    if (!silent && syncBadge) {
+      syncBadge.classList.remove('animate-pulse');
+      syncBadge.style.color = '';
+    }
   }
 }
 
-// Manual Sync Now button handler
+// Manual Sync Now button handler (simply triggers full fetch)
 async function manualSyncNow() {
   const btn = document.getElementById('sync-now-btn');
   if (btn) btn.disabled = true;
-  await loadFromGoogleSheets();
+  await fetchFreshData(false);
   if (btn) btn.disabled = false;
   alert('🔄 Data synchronization complete!');
 }
 
-// Auto-Sync and state listener on connection status
+// State listeners on connection status
 window.addEventListener('online', async () => {
-  console.log("Internet restored. Auto-synchronizing pending changes...");
-  await syncToGoogleSheets();
+  console.log("Internet restored. Fetching fresh data...");
+  await fetchFreshData(true);
 });
 window.addEventListener('offline', () => {
   isOffline = true;
   document.getElementById('offline-badge').classList.remove('hidden');
 });
 
-// Auto-refresh interval (30 seconds)
-setInterval(loadFromGoogleSheets, 30000);
+// Auto-refresh interval (15 seconds) to satisfy multi-device synchronization requirement
+setInterval(() => {
+  if (currentUser && activeTab !== 'consult') {
+    fetchFreshData(true).then(() => {
+      const isTyping = document.activeElement && 
+        (document.activeElement.tagName === 'INPUT' || 
+         document.activeElement.tagName === 'TEXTAREA' || 
+         document.activeElement.tagName === 'SELECT');
+      if (!isTyping) {
+        renderView();
+      }
+    });
+  }
+}, 15000);
 
 // Auto-refresh queue interval (10 seconds)
 setInterval(() => {
-  if (activeTab === 'queue') {
+  if (currentUser && activeTab === 'queue') {
     fetchLiveQueue(true); // Silent background fetch
   }
 }, 10000);
@@ -911,8 +676,25 @@ function updateSyncBadge(){
   else el.style.display='none';
 }
 
-function renderView(){
+async function renderView(){
   const c=document.getElementById('content');
+  if(!c)return;
+  
+  // Clean, native loading spinner during direct fetch
+  c.innerHTML=`
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:60vh;gap:12px;">
+      <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-teal-600"></div>
+      <div style="font-size:14px;color:var(--slate-500);font-weight:600;">Fetching live data from Google Sheets...</div>
+    </div>
+  `;
+
+  // Always fetch fresh data before displaying a view
+  if (activeTab !== 'consult') {
+    await fetchFreshData(false);
+  } else {
+    await fetchFreshData(true); // silent fetch for active consultation so doctor doesn't get interrupted
+  }
+
   c.innerHTML='';
   c.className='fade-in';
   switch(activeTab){
@@ -942,12 +724,12 @@ function patientInitials(name){return name.split(' ').map(w=>w[0]).join('').toUp
 
 // ==================== DASHBOARD ====================
 function renderDashboard(){
-  const patients=getAll(KEYS.PATIENTS);
-  const cases=getAll(KEYS.CASES);
-  const couriers=getAll(KEYS.COURIERS);
-  const billing=getAll(KEYS.BILLING);
-  const medicines=getAll(KEYS.MEDICINES);
-  const appts=getAll(KEYS.APPOINTMENTS);
+  const patients=g_data.patients;
+  const cases=g_data.cases;
+  const couriers=g_data.couriers;
+  const billing=g_data.billing;
+  const medicines=g_data.medicines;
+  const appts=g_data.appointments;
 
   const todayCases=cases.filter(c=>c.date===today()).length;
   const pendingCouriers=couriers.filter(c=>c.status!=='Delivered').length;
@@ -979,7 +761,7 @@ function renderDashboard(){
     </div>
     <div class="stat-card" style="cursor:pointer;" onclick="navigate('queue')">
       <div class="stat-icon">🎫</div>
-      <div class="stat-value" style="color:var(--amber-600);">${getAll(KEYS.QUEUE).filter(q=>{
+      <div class="stat-value" style="color:var(--amber-600);">${g_data.queue.filter(q=>{
         const qDate = q.date ? q.date.toString().split('T')[0] : '';
         return qDate === today() && q.status==='Waiting';
       }).length}</div>
@@ -1006,7 +788,7 @@ function renderDashboard(){
       </div>
       ${todayFollowups.length===0?`<div class="empty-state" style="padding:20px;"><div class="empty-icon">✅</div><div class="empty-sub">No follow-ups today</div></div>`:''}
       ${todayFollowups.slice(0,4).map(c=>{
-        const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===c.patientId)||{name:'Unknown',mobile:''};
+        const p=patients.find(pt=>pt.id===c.patientId)||{name:'Unknown',mobile:''};
         return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--slate-100);">
           <div class="patient-avatar" style="width:32px;height:32px;font-size:11px;">${patientInitials(p.name)}</div>
           <div style="flex:1;">
@@ -1026,7 +808,7 @@ function renderDashboard(){
       </div>
       ${missedFollowups.length===0?`<div class="empty-state" style="padding:20px;"><div class="empty-icon">✅</div><div class="empty-sub">No overdue follow-ups</div></div>`:''}
       ${missedFollowups.slice(0,4).map(c=>{
-        const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===c.patientId)||{name:'Unknown',mobile:''};
+        const p=patients.find(pt=>pt.id===c.patientId)||{name:'Unknown',mobile:''};
         const days=Math.floor((new Date()-new Date(c.followUpDate))/(1000*86400));
         return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--slate-100);">
           <div class="patient-avatar" style="width:32px;height:32px;font-size:11px;">${patientInitials(p.name)}</div>
@@ -1046,7 +828,7 @@ function renderDashboard(){
       <div style="font-size:14px;font-weight:800;color:var(--slate-800);">📦 Pending Courier Dispatch</div>
       <button class="btn btn-secondary btn-sm" onclick="navigate('courier')">View All →</button>
     </div>
-    ${getAll(KEYS.COURIERS).filter(c=>c.status!=='Delivered').slice(0,3).map(c=>`
+    ${couriers.filter(c=>c.status!=='Delivered').slice(0,3).map(c=>`
       <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--slate-100);">
         <span style="font-size:18px;">📦</span>
         <div style="flex:1;">
@@ -1060,7 +842,7 @@ function renderDashboard(){
   ${lowStock>0?`<div class="card" style="border-color:var(--amber-100);">
     <div style="font-size:14px;font-weight:800;color:var(--amber-700);margin-bottom:10px;">⚠️ Low Medicine Stock (${lowStock} items)</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;">
-      ${getAll(KEYS.MEDICINES).filter(m=>m.stock<=m.minStock).map(m=>`<span class="badge badge-amber">${m.name} ${m.potency} (${m.stock} left)</span>`).join('')}
+      ${medicines.filter(m=>m.stock<=m.minStock).map(m=>`<span class="badge badge-amber">${m.name} ${m.potency} (${m.stock} left)</span>`).join('')}
     </div>
   </div>`:''}
   `;
@@ -1120,7 +902,7 @@ async function fetchLiveQueue(silent = false) {
       }).filter(q => q.date === todayStr);
 
       // Auto-add today's scheduled appointments if they are not already in the queue
-      const todayAppts = getAll(KEYS.APPOINTMENTS)
+      const todayAppts = g_data.appointments
         .filter(a => {
           const aDate = a.date ? a.date.toString().split('T')[0] : '';
           return aDate === todayStr && a.status === 'Scheduled';
@@ -1133,7 +915,7 @@ async function fetchLiveQueue(silent = false) {
           .some(q => q.appointmentId === appt.id && q.date === todayStr);
         
         if (!alreadyInQueue) {
-          const patient = getAll(KEYS.PATIENTS)
+          const patient = g_data.patients
             .find(p => p.mobile === appt.mobile || p.name === appt.patientName);
           
           const nextToken = allQueueForTodayAndSync.length > 0 
@@ -1163,6 +945,7 @@ async function fetchLiveQueue(silent = false) {
       });
 
       currentQueueData = mappedQueue;
+      g_data.queue = mappedQueue;
       // Also update localStorage as a fallback for other views (like dashboard)
       saveAll(KEYS.QUEUE, mappedQueue);
       
@@ -1332,7 +1115,7 @@ function showAddToQueue() {
 
 function searchQueuePatient() {
   const q = document.getElementById('q-search').value.toLowerCase();
-  const patients = getAll(KEYS.PATIENTS);
+  const patients = g_data.patients;
   const matches = patients.filter(p => 
     p.name.toLowerCase().includes(q) || p.mobile.includes(q)
   ).slice(0, 5);
@@ -1407,10 +1190,8 @@ async function saveToQueue(token) {
       throw new Error(result ? result.error : "Unknown error adding record");
     }
 
-    // Also update locally
-    const queue = getAll(KEYS.QUEUE);
-    queue.push(newRecord);
-    saveAll(KEYS.QUEUE, queue);
+    // Fetch fresh data from Google Sheets first
+    await fetchFreshData(true);
 
     closeModal();
     renderQueue();
@@ -1443,15 +1224,8 @@ async function startQueueConsult(qid, pid) {
       throw new Error(result ? result.error : "Failed to update status");
     }
 
-    // Update locally too
-    const queue = getAll(KEYS.QUEUE);
-    const idx = queue.findIndex(q => q.id === qid);
-    if (idx !== -1) {
-      queue[idx].status = 'In-Consultation';
-      saveAll(KEYS.QUEUE, queue);
-    }
-    const item = currentQueueData.find(q => q.id === qid);
-    if (item) item.status = 'In-Consultation';
+    // Always fetch fresh data on success
+    await fetchFreshData(true);
 
     startConsult(pid);
   } catch (err) {
@@ -1479,13 +1253,8 @@ async function markQueueDone(qid) {
       throw new Error(result ? result.error : "Failed to update status");
     }
 
-    // Update locally too
-    const queue = getAll(KEYS.QUEUE);
-    const idx = queue.findIndex(q => q.id === qid);
-    if (idx !== -1) {
-      queue[idx].status = 'Done';
-      saveAll(KEYS.QUEUE, queue);
-    }
+    // Always fetch fresh data on success
+    await fetchFreshData(true);
 
     renderQueue();
   } catch (err) {
@@ -1513,9 +1282,8 @@ async function removeFromQueue(qid) {
       throw new Error(result ? result.error : "Failed to delete record");
     }
 
-    // Update locally too
-    const queue = getAll(KEYS.QUEUE).filter(q => q.id !== qid);
-    saveAll(KEYS.QUEUE, queue);
+    // Always fetch fresh data on success
+    await fetchFreshData(true);
 
     renderQueue();
   } catch (err) {
@@ -1531,7 +1299,7 @@ function getGreeting(){
 
 // ==================== PATIENTS ====================
 function renderPatients(){
-  const patients=getAll(KEYS.PATIENTS);
+  const patients=g_data.patients;
   document.getElementById('content').innerHTML=`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
     <div>
@@ -1552,7 +1320,7 @@ function renderPatients(){
 
 function filterPatients(){
   const q=document.getElementById('patient-search').value.toLowerCase();
-  const all=getAll(KEYS.PATIENTS);
+  const all=g_data.patients;
   const filtered=all.filter(p=>p.name.toLowerCase().includes(q)||p.mobile.includes(q)||p.id.toLowerCase().includes(q));
   renderPatientList(filtered);
 }
@@ -1635,9 +1403,11 @@ async function savePatient(){
   const gender=document.getElementById('p-gender').value;
   const err=document.getElementById('p-err');
   if(!name||!mobile||!age||!gender){err.textContent='Please fill required fields.';err.classList.remove('hidden');return;}
-  const patients=getAll(KEYS.PATIENTS);
+  
+  const patients=g_data.patients;
   const year=new Date().getFullYear();
   const id=`HOM-${year}-${(patients.length+1).toString().padStart(4,'0')}`;
+  
   const p={
     id,name,mobile,age:parseInt(age),gender,
     address:document.getElementById('p-address').value,
@@ -1645,18 +1415,35 @@ async function savePatient(){
     bloodGroup:document.getElementById('p-blood').value,
     createdAt:today(),updatedAt:Date.now()
   };
-  patients.unshift(p);
-  saveAll(KEYS.PATIENTS,patients);
-  closeModal();
-  renderPatients();
-  await syncToGoogleSheets();
+
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "add_record",
+        sheet: "PATIENTS",
+        record: p
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to save patient");
+
+    await fetchFreshData(true);
+    closeModal();
+    renderPatients();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to save patient to Google Sheets: " + err.message);
+  }
 }
 
 function showPatientDetail(pid){
-  const patients=getAll(KEYS.PATIENTS);
+  const patients=g_data.patients;
   const p=patients.find(pt=>pt.id===pid);
   if(!p)return;
-  const cases=getAll(KEYS.CASES).filter(c=>c.patientId===pid).sort((a,b)=>b.date.localeCompare(a.date));
+  const cases=g_data.cases.filter(c=>c.patientId===pid).sort((a,b)=>b.date.localeCompare(a.date));
   showModal(`
   <div class="modal-header">
     <div style="display:flex;align-items:center;gap:12px;">
@@ -1700,7 +1487,7 @@ function showPatientDetail(pid){
 }
 
 function showEditPatient(pid){
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===pid);
+  const p=g_data.patients.find(pt=>pt.id===pid);
   if(!p)return;
   showModal(`
   <div class="modal-header">
@@ -1730,10 +1517,10 @@ function showEditPatient(pid){
 }
 
 async function updatePatient(pid){
-  const patients=getAll(KEYS.PATIENTS);
-  const idx=patients.findIndex(p=>p.id===pid);
-  if(idx===-1)return;
-  patients[idx]={...patients[idx],
+  const originalPatient = g_data.patients.find(p => p.id === pid);
+  if (!originalPatient) return;
+  
+  const updates = {
     name:document.getElementById('ep-name').value,
     mobile:document.getElementById('ep-mobile').value,
     age:parseInt(document.getElementById('ep-age').value),
@@ -1743,14 +1530,34 @@ async function updatePatient(pid){
     bloodGroup:document.getElementById('ep-blood').value,
     updatedAt:Date.now()
   };
-  saveAll(KEYS.PATIENTS,patients);
-  closeModal();
-  renderPatients();
-  await syncToGoogleSheets();
+
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "update_record",
+        sheet: "PATIENTS",
+        idField: "PatientID",
+        id: pid,
+        updates: updates
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to update patient");
+
+    await fetchFreshData(true);
+    closeModal();
+    renderPatients();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to update patient on Google Sheets: " + err.message);
+  }
 }
 
 function showMedHistory(pid){
-  const cases=getAll(KEYS.CASES).filter(c=>c.patientId===pid).sort((a,b)=>b.date.localeCompare(a.date));
+  const cases=g_data.cases.filter(c=>c.patientId===pid).sort((a,b)=>b.date.localeCompare(a.date));
   const latest=cases[0]||{};
   showModal(`
   <div class="modal-header">
@@ -1785,7 +1592,6 @@ function showMedHistory(pid){
 }
 
 async function saveMedHistory(pid){
-  const cases=getAll(KEYS.CASES);
   const entry={
     id:'REC-MH-'+Date.now(),patientId:pid,date:today(),type:'history',
     complaint:document.getElementById('mh-complaint').value,
@@ -1803,11 +1609,28 @@ async function saveMedHistory(pid){
     prescriptions:[],visitType:'history',
     updatedAt:Date.now()
   };
-  cases.unshift(entry);
-  saveAll(KEYS.CASES,cases);
-  closeModal();
-  alert('Medical history saved!');
-  await syncToGoogleSheets();
+
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "add_record",
+        sheet: "CASES",
+        record: entry
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to save medical history");
+
+    await fetchFreshData(true);
+    closeModal();
+    alert('Medical history saved!');
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to save medical history: " + err.message);
+  }
 }
 
 // ==================== CONSULTATION ====================
@@ -1877,14 +1700,14 @@ function calculateFollowUpDate() {
 }
 
 function viewPastConsultation(caseId) {
-  const cases = getAll(KEYS.CASES);
+  const cases = g_data.cases;
   const c = cases.find(item => item.id === caseId);
   if (!c) {
     alert("Consultation not found!");
     return;
   }
   
-  const patients = getAll(KEYS.PATIENTS);
+  const patients = g_data.patients;
   const p = patients.find(pt => pt.id === c.patientId) || {};
   
   const rxs = c.prescriptions || [];
@@ -2010,7 +1833,7 @@ function renderPreviousCaseHistory(pid) {
     return;
   }
 
-  const allCases = getAll(KEYS.CASES);
+  const allCases = g_data.cases;
   console.log('All cases:', allCases.length, 'Looking for pid:', pid);
   console.log('Matching:', allCases.filter(c => c.patientId === pid).length);
   const cases = allCases
@@ -2106,8 +1929,8 @@ function attachConsultDraftListeners() {
 }
 
 function renderConsult(){
-  const patients=getAll(KEYS.PATIENTS);
-  const medicines=getAll(KEYS.MEDICINES);
+  const patients=g_data.patients;
+  const medicines=g_data.medicines;
   const preselected=navParam;
   rxList=[];
 
@@ -2345,7 +2168,7 @@ function renderConsult(){
 
 function searchConsultPatient(){
   const q=document.getElementById('c-search').value.toLowerCase();
-  const patients=getAll(KEYS.PATIENTS);
+  const patients=g_data.patients;
   const matches=patients.filter(p=>p.name.toLowerCase().includes(q)||p.mobile.includes(q)).slice(0,5);
   const box=document.getElementById('c-suggestions');
   if(!q||matches.length===0){box.innerHTML='';return;}
@@ -2360,7 +2183,7 @@ function selectConsultPatient(id,name,mobile){
   document.getElementById('c-pid').value=id;
   document.getElementById('c-search').value=name+' ('+mobile+')';
   document.getElementById('c-suggestions').innerHTML='';
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===id);
+  const p=g_data.patients.find(pt=>pt.id===id);
   const displayMobile = mobile ? ' · ' + mobile : '';
   const displayAgeGender = p ? ' · ' + p.age + 'y · ' + p.gender : '';
   document.getElementById('c-selected').textContent='✅ '+name+' · '+id + displayAgeGender + displayMobile;
@@ -2378,7 +2201,7 @@ function toggleOnlineFields(show){
 let rxRowCount=0;
 function addRxRow(name='', potency='', dosage='', duration=''){
   rxRowCount++;
-  const medicines=getAll(KEYS.MEDICINES);
+  const medicines=g_data.medicines;
   const medOptions=medicines.map(m=>`<option value="${m.name}">${m.name} (${m.potency})</option>`).join('');
   const div=document.createElement('div');
   div.id=`rx-row-${rxRowCount}`;
@@ -2482,54 +2305,102 @@ async function saveConsult(){
     updatedAt:Date.now()
   };
 
-  const cases=getAll(KEYS.CASES);
-  cases.unshift(consult);
-  saveAll(KEYS.CASES,cases);
-
-  // Billing entry
-  const p=getAll(KEYS.PATIENTS).find(pt=>pt.id===pid);
-  const total=fee+medCharge+courierCharge;
-  if(total>0){
-    const bills=getAll(KEYS.BILLING);
-    const year=new Date().getFullYear();
-    bills.unshift({
-      id:`INV-${year}-${(bills.length+1).toString().padStart(4,'0')}`,
-      patientId:pid,patientName:p?.name||'',date:today(),
-      consultFee:fee,medCharge,courierCharge,total,
-      payMode:document.getElementById('c-paymode').value,
-      paymentStatus:payStatus,
-      updatedAt:Date.now()
-    });
-    saveAll(KEYS.BILLING,bills);
+  const saveBtn = document.querySelector('button[onclick^="saveConsult"]');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
   }
 
-  // Courier entry for online
-  if(visitType==='online'&&prescriptions.length>0){
-    const couriers=getAll(KEYS.COURIERS);
-    couriers.unshift({
-      id:'COU-'+(couriers.length+1).toString().padStart(3,'0'),
-      patientId:pid,patientName:p?.name||'',mobile:p?.mobile||'',
-      address:document.getElementById('c-shipaddr').value,
-      caseId,status:'Prescription Ready',
-      dispatchDate:'',deliveryDate:'',carrier:'',tracking:'',notes:'',
-      createdAt:today(),
-      updatedAt:Date.now()
-    });
-    saveAll(KEYS.COURIERS,couriers);
-  }
+  try {
+    const activeUrl = getSyncUrl();
 
-  navParam=null;
-  localStorage.removeItem('hom_consult_draft');
-  navigate('patients');
-  setTimeout(()=>alert('✅ Consultation saved successfully!'),100);
-  await syncToGoogleSheets();
+    // 1. Save Consultation Case (Backend auto-maps prescriptions to PRESCRIPTIONS sheet)
+    const resCase = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "add_record",
+        sheet: "CASES",
+        record: consult
+      })
+    });
+    const resultCase = await resCase.json();
+    if (!resultCase || !resultCase.success) throw new Error(resultCase ? resultCase.error : "Failed to save consultation");
+
+    const p=g_data.patients.find(pt=>pt.id===pid);
+
+    // 2. Billing entry (if total > 0)
+    const total=fee+medCharge+courierCharge;
+    if(total>0){
+      const year=new Date().getFullYear();
+      const invoiceId=`INV-${year}-${(g_data.billing.length+1).toString().padStart(4,'0')}`;
+      const resBill = await fetch(activeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "add_record",
+          sheet: "BILLING",
+          record: {
+            id: invoiceId,
+            patientId:pid,patientName:p?.name||'',date:today(),
+            consultFee:fee,medCharge,courierCharge,total,
+            payMode:document.getElementById('c-paymode').value,
+            paymentStatus:payStatus,
+            updatedAt:Date.now()
+          }
+        })
+      });
+      const resultBill = await resBill.json();
+      if (!resultBill || !resultBill.success) throw new Error(resultBill ? resultBill.error : "Failed to save billing record");
+    }
+
+    // 3. Courier entry for online
+    if(visitType==='online'&&prescriptions.length>0){
+      const courierId='COU-'+(g_data.couriers.length+1).toString().padStart(3,'0');
+      const resCourier = await fetch(activeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "add_record",
+          sheet: "COURIERS",
+          record: {
+            id: courierId,
+            patientId:pid,patientName:p?.name||'',mobile:p?.mobile||'',
+            address:document.getElementById('c-shipaddr').value,
+            caseId,status:'Prescription Ready',
+            dispatchDate:'',deliveryDate:'',carrier:'',tracking:'',notes:'',
+            createdAt:today(),
+            updatedAt:Date.now()
+          }
+        })
+      });
+      const resultCourier = await resCourier.json();
+      if (!resultCourier || !resultCourier.success) throw new Error(resultCourier ? resultCourier.error : "Failed to save courier record");
+    }
+
+    navParam=null;
+    localStorage.removeItem('hom_consult_draft');
+    
+    // Fetch fresh data on success before moving screens
+    await fetchFreshData(true);
+
+    navigate('patients');
+    setTimeout(()=>alert('✅ Consultation saved successfully!'),100);
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to save consultation to Google Sheets: " + err.message);
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Save Consultation';
+    }
+  }
 }
 
 // ==================== COURIER ====================
 const COURIER_PIPELINE=['Prescription Ready','Packing Pending','Courier Pending','Courier Dispatched','Delivered'];
 
 function renderCourier(){
-  const couriers=getAll(KEYS.COURIERS);
+  const couriers=g_data.couriers;
   const pending=couriers.filter(c=>c.status!=='Delivered');
   document.getElementById('content').innerHTML=`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
@@ -2563,7 +2434,7 @@ function renderCourier(){
 function filterCouriers(){
   const q=document.getElementById('courier-search')?.value.toLowerCase()||'';
   const sf=document.getElementById('courier-status-filter')?.value||'All';
-  const couriers=getAll(KEYS.COURIERS);
+  const couriers=g_data.couriers;
   const filtered=couriers.filter(c=>{
     const mq=c.patientName.toLowerCase().includes(q)||c.id.toLowerCase().includes(q)||(c.tracking||'').toLowerCase().includes(q);
     const ms=sf==='All'||c.status===sf;
@@ -2616,24 +2487,43 @@ function renderCourierList(couriers){
 }
 
 async function progressCourier(id){
-  const couriers=getAll(KEYS.COURIERS);
-  const idx=couriers.findIndex(c=>c.id===id);
-  if(idx===-1)return;
-  const sIdx=COURIER_PIPELINE.indexOf(couriers[idx].status);
-  if(sIdx<COURIER_PIPELINE.length-1){
-    couriers[idx].status=COURIER_PIPELINE[sIdx+1];
-    if(couriers[idx].status==='Courier Dispatched')couriers[idx].dispatchDate=today();
-    if(couriers[idx].status==='Delivered')couriers[idx].deliveryDate=today();
-    couriers[idx].updatedAt=Date.now();
-    saveAll(KEYS.COURIERS,couriers);
-    renderCourier();
-    await syncToGoogleSheets();
+  const c = g_data.couriers.find(x => x.id === id);
+  if(!c) return;
+  const sIdx = COURIER_PIPELINE.indexOf(c.status);
+  if(sIdx < COURIER_PIPELINE.length - 1){
+    const nextStatus = COURIER_PIPELINE[sIdx+1];
+    const updates = { status: nextStatus, updatedAt: Date.now() };
+    if (nextStatus === 'Courier Dispatched') updates.dispatchDate = today();
+    if (nextStatus === 'Delivered') updates.deliveryDate = today();
+
+    try {
+      const activeUrl = getSyncUrl();
+      const res = await fetch(activeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "update_record",
+          sheet: "COURIERS",
+          idField: "CourierID",
+          id: id,
+          updates: updates
+        })
+      });
+      const result = await res.json();
+      if (!result || !result.success) throw new Error(result ? result.error : "Failed to update courier");
+
+      await fetchFreshData(true);
+      renderCourier();
+    } catch (err) {
+      console.error(err);
+      alert("⚠️ Failed to update courier: " + err.message);
+    }
   }
 }
 
 function showCourierEdit(id){
-  const c=getAll(KEYS.COURIERS).find(x=>x.id===id);
-  if(!c)return;
+  const c = g_data.couriers.find(x => x.id === id);
+  if(!c) return;
   showModal(`
   <div class="modal-header">
     <div class="modal-title">✏️ Update Courier Info</div>
@@ -2656,22 +2546,41 @@ function showCourierEdit(id){
 }
 
 async function saveCourierEdit(id){
-  const couriers=getAll(KEYS.COURIERS);
-  const idx=couriers.findIndex(c=>c.id===id);
-  if(idx===-1)return;
-  couriers[idx].carrier=document.getElementById('ce-carrier').value;
-  couriers[idx].tracking=document.getElementById('ce-tracking').value;
-  couriers[idx].notes=document.getElementById('ce-notes').value;
-  couriers[idx].updatedAt=Date.now();
-  saveAll(KEYS.COURIERS,couriers);
-  closeModal();
-  renderCourier();
-  await syncToGoogleSheets();
+  const updates = {
+    carrier: document.getElementById('ce-carrier').value,
+    tracking: document.getElementById('ce-tracking').value,
+    notes: document.getElementById('ce-notes').value,
+    updatedAt: Date.now()
+  };
+
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "update_record",
+        sheet: "COURIERS",
+        idField: "CourierID",
+        id: id,
+        updates: updates
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to update courier details");
+
+    await fetchFreshData(true);
+    closeModal();
+    renderCourier();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to update courier details: " + err.message);
+  }
 }
 
 function sendCourierWA(id){
-  const c=getAll(KEYS.COURIERS).find(x=>x.id===id);
-  if(!c)return;
+  const c = g_data.couriers.find(x => x.id === id);
+  if(!c) return;
   const cfg=ls(KEYS.SETTINGS)||{};
   const drName=cfg.doctorName||'Doctor';
   const clinicName=cfg.clinicName||'Homeopathy Clinic';
@@ -2689,7 +2598,7 @@ function sendCourierWA(id){
 
 // ==================== BILLING ====================
 function renderBilling(){
-  const bills=getAll(KEYS.BILLING);
+  const bills=g_data.billing;
   const totalPaid=bills.filter(b=>b.paymentStatus==='Paid').reduce((s,b)=>s+b.total,0);
   const totalPending=bills.filter(b=>b.paymentStatus==='Pending').reduce((s,b)=>s+b.total,0);
   document.getElementById('content').innerHTML=`
@@ -2720,7 +2629,7 @@ function renderBilling(){
 function filterBills(){
   const q=document.getElementById('bill-search')?.value.toLowerCase()||'';
   const sf=document.getElementById('bill-status-filter')?.value||'All';
-  const bills=getAll(KEYS.BILLING);
+  const bills=g_data.billing;
   const filtered=bills.filter(b=>{
     const mq=b.patientName.toLowerCase().includes(q)||b.id.toLowerCase().includes(q);
     const ms=sf==='All'||b.paymentStatus===sf;
@@ -2756,20 +2665,33 @@ function renderBillList(bills){
 }
 
 async function markPaid(id){
-  const bills=getAll(KEYS.BILLING);
-  const idx=bills.findIndex(b=>b.id===id);
-  if(idx!==-1){
-    bills[idx].paymentStatus='Paid';
-    bills[idx].updatedAt=Date.now();
-    saveAll(KEYS.BILLING,bills);
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "update_record",
+        sheet: "BILLING",
+        idField: "InvoiceID",
+        id: id,
+        updates: { paymentStatus: 'Paid', updatedAt: Date.now() }
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to update billing record");
+
+    await fetchFreshData(true);
     renderBilling();
-    await syncToGoogleSheets();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to update payment status: " + err.message);
   }
 }
 
 // ==================== INVENTORY ====================
 function renderInventory(){
-  const medicines=getAll(KEYS.MEDICINES);
+  const medicines=g_data.medicines;
   const low=medicines.filter(m=>m.stock<=m.minStock);
   document.getElementById('content').innerHTML=`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
@@ -2795,7 +2717,7 @@ function renderInventory(){
 
 function filterMeds(){
   const q=document.getElementById('med-search')?.value.toLowerCase()||'';
-  renderMedList(getAll(KEYS.MEDICINES).filter(m=>m.name.toLowerCase().includes(q)));
+  renderMedList(g_data.medicines.filter(m=>m.name.toLowerCase().includes(q)));
 }
 
 function renderMedList(medicines){
@@ -2853,8 +2775,9 @@ function showAddMedicine(){
 async function saveMedicine(){
   const name=document.getElementById('am-name').value.trim();
   if(!name)return alert('Medicine name required!');
-  const meds=getAll(KEYS.MEDICINES);
-  meds.push({
+  
+  const meds=g_data.medicines;
+  const newMed = {
     id:`MED-${(meds.length+1).toString().padStart(3,'0')}`,
     name,potency:document.getElementById('am-potency').value,
     category:document.getElementById('am-cat').value,
@@ -2862,15 +2785,33 @@ async function saveMedicine(){
     minStock:parseInt(document.getElementById('am-min').value)||5,
     price:parseFloat(document.getElementById('am-price').value)||0,
     updatedAt:Date.now()
-  });
-  saveAll(KEYS.MEDICINES,meds);
-  closeModal();
-  renderInventory();
-  await syncToGoogleSheets();
+  };
+
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "add_record",
+        sheet: "MEDICINES",
+        record: newMed
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to add medicine");
+
+    await fetchFreshData(true);
+    closeModal();
+    renderInventory();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to add medicine to Google Sheets: " + err.message);
+  }
 }
 
 function showEditMed(id){
-  const m=getAll(KEYS.MEDICINES).find(x=>x.id===id);
+  const m=g_data.medicines.find(x=>x.id===id);
   if(!m)return;
   showModal(`
   <div class="modal-header">
@@ -2891,11 +2832,10 @@ function showEditMed(id){
 }
 
 async function updateMed(id){
-  const meds=getAll(KEYS.MEDICINES);
-  const idx=meds.findIndex(m=>m.id===id);
-  if(idx===-1)return;
-  meds[idx]={
-    ...meds[idx],
+  const originalMed = g_data.medicines.find(m => m.id === id);
+  if (!originalMed) return;
+
+  const updates = {
     name:document.getElementById('em-name').value,
     potency:document.getElementById('em-potency').value,
     stock:parseInt(document.getElementById('em-stock').value)||0,
@@ -2903,15 +2843,35 @@ async function updateMed(id){
     price:parseFloat(document.getElementById('em-price').value)||0,
     updatedAt:Date.now()
   };
-  saveAll(KEYS.MEDICINES,meds);
-  closeModal();
-  renderInventory();
-  await syncToGoogleSheets();
+
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "update_record",
+        sheet: "MEDICINES",
+        idField: "MedicineID",
+        id: id,
+        updates: updates
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to update medicine");
+
+    await fetchFreshData(true);
+    closeModal();
+    renderInventory();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to update medicine on Google Sheets: " + err.message);
+  }
 }
 
 // ==================== APPOINTMENTS ====================
 function renderAppointments(){
-  const appts=getAll(KEYS.APPOINTMENTS);
+  const appts=g_data.appointments;
   const todayAppts=appts.filter(a=>a.date===today()&&a.status!=='Cancelled');
   document.getElementById('content').innerHTML=`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
@@ -2933,7 +2893,7 @@ function renderAppointments(){
 function filterAppts(mode){
   document.querySelectorAll('#app .tab-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('apt-'+mode+'-btn')?.classList.add('active');
-  const appts=getAll(KEYS.APPOINTMENTS);
+  const appts=g_data.appointments;
   let filtered=appts;
   if(mode==='today')filtered=appts.filter(a=>a.date===today());
   else if(mode==='upcoming')filtered=appts.filter(a=>a.date>=today()&&a.status==='Scheduled');
@@ -2961,7 +2921,7 @@ function renderApptList(appts){
 }
 
 function showAddAppointment(){
-  const patients=getAll(KEYS.PATIENTS);
+  const patients=g_data.patients;
   showModal(`
   <div class="modal-header">
     <div class="modal-title">📅 Book Appointment</div>
@@ -2993,8 +2953,8 @@ async function saveAppt(){
   const pname=document.getElementById('na-pname').value.trim();
   const date=document.getElementById('na-date').value;
   if(!pname||!date)return alert('Name and date required!');
-  const appts=getAll(KEYS.APPOINTMENTS);
-  appts.push({
+  
+  const newAppt = {
     id:'APP-'+Date.now(),
     patientName:pname.split('(')[0].trim(),
     mobile:document.getElementById('na-mobile').value,
@@ -3003,22 +2963,53 @@ async function saveAppt(){
     status:'Scheduled',
     notes:document.getElementById('na-notes').value,
     updatedAt:Date.now()
-  });
-  saveAll(KEYS.APPOINTMENTS,appts);
-  closeModal();
-  renderAppointments();
-  await syncToGoogleSheets();
+  };
+
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "add_record",
+        sheet: "APPOINTMENTS",
+        record: newAppt
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to book appointment");
+
+    await fetchFreshData(true);
+    closeModal();
+    renderAppointments();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to book appointment on Google Sheets: " + err.message);
+  }
 }
 
 async function updateApptStatus(id,status){
-  const appts=getAll(KEYS.APPOINTMENTS);
-  const idx=appts.findIndex(a=>a.id===id);
-  if(idx!==-1){
-    appts[idx].status=status;
-    appts[idx].updatedAt=Date.now();
-    saveAll(KEYS.APPOINTMENTS,appts);
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "update_record",
+        sheet: "APPOINTMENTS",
+        idField: "AppointmentID",
+        id: id,
+        updates: { status: status, updatedAt: Date.now() }
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) throw new Error(result ? result.error : "Failed to update appointment");
+
+    await fetchFreshData(true);
     renderAppointments();
-    await syncToGoogleSheets();
+  } catch (err) {
+    console.error(err);
+    alert("⚠️ Failed to update appointment status on Google Sheets: " + err.message);
   }
 }
 
@@ -3080,7 +3071,7 @@ async function saveSettings(){
   ss(KEYS.SETTINGS,cfg);
   document.getElementById('sb-clinic-name').textContent=cfg.clinicName||'Clinic';
   alert('✅ Settings saved! New PINs active from next login.');
-  await syncToGoogleSheets();
+  await fetchFreshData(true);
 }
 
 function saveSyncConfig(){
@@ -3096,7 +3087,7 @@ function saveSyncConfig(){
 async function manualSync(){
   const btn = document.getElementById('manual-sync-btn');
   if (btn) btn.disabled = true;
-  await loadFromGoogleSheets();
+  await fetchFreshData(true);
   if (btn) btn.disabled = false;
   alert('✅ Sync completed!');
 }
@@ -3116,7 +3107,7 @@ async function initAppStartup() {
   initDB();
   
   // Immediately download latest data from Google Sheets on start (Requirement 3)
-  await loadFromGoogleSheets();
+  await fetchFreshData(true);
   
   // Hide loading screen and display proper UI after download completes
   const loader = document.getElementById('loading-screen');
