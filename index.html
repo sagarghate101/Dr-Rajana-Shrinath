@@ -509,6 +509,12 @@ async function loadFromGoogleSheets() {
         const localOnly = localToday.filter(q => !remoteIds.has(q.id));
         const merged = [...mappedQueue, ...localOnly];
         saveAll(KEYS.QUEUE, merged);
+
+        // Update in-memory currentQueueData
+        currentQueueData = merged.filter(q => q.date === todayStr);
+        if (activeTab === 'queue') {
+          renderQueueList(currentQueueData);
+        }
       }
 
       // Decode Medicines
@@ -779,6 +785,13 @@ window.addEventListener('offline', () => {
 
 // Auto-refresh interval (30 seconds)
 setInterval(loadFromGoogleSheets, 30000);
+
+// Auto-refresh queue interval (10 seconds)
+setInterval(() => {
+  if (activeTab === 'queue') {
+    fetchLiveQueue(true); // Silent background fetch
+  }
+}, 10000);
 
 // ==================== AUTH ====================
 let currentUser=null;
@@ -1054,69 +1067,157 @@ function renderDashboard(){
 }
 
 // ==================== QUEUE / TOKEN SYSTEM ====================
-function renderQueue() {
-  // Today's appointments auto-add to queue if not already added
-  const todayAppts = getAll(KEYS.APPOINTMENTS)
-    .filter(a => {
-      const aDate = a.date ? a.date.toString().split('T')[0] : '';
-      return aDate === today() && a.status === 'Scheduled';
-    });
-  
-  const existingQueue = getAll(KEYS.QUEUE);
-  let addedAny = false;
-  
-  todayAppts.forEach(appt => {
-    const alreadyInQueue = existingQueue
-      .some(q => q.appointmentId === appt.id && 
-        (q.date ? q.date.toString().split('T')[0] : '') === today());
-    
-    if (!alreadyInQueue) {
-      // Find patient by mobile
-      const patient = getAll(KEYS.PATIENTS)
-        .find(p => p.mobile === appt.mobile || p.name === appt.patientName);
-      
-      const currentQueue = getAll(KEYS.QUEUE)
-        .filter(q => {
-          const qDate = q.date ? q.date.toString().split('T')[0] : '';
-          return qDate === today();
-        });
-      const nextToken = currentQueue.length > 0 
-        ? Math.max(...currentQueue.map(q => q.token)) + 1 
-        : 1;
-      
-      const allQueue = getAll(KEYS.QUEUE);
-      allQueue.push({
-        id: 'Q-APT-' + appt.id,
-        token: nextToken,
-        patientId: patient ? patient.id : '',
-        patientName: appt.patientName,
-        mobile: appt.mobile,
-        date: today(),
-        addedTime: appt.time || '—',
-        type: appt.type || 'Appointment',
-        status: 'Waiting',
-        appointmentId: appt.id,
-        isAppointment: true
-      });
-      saveAll(KEYS.QUEUE, allQueue);
-      addedAny = true;
-    }
-  });
+let currentQueueData = [];
+let queueLoading = false;
 
-  if (addedAny) {
-    syncToGoogleSheets();
+async function fetchLiveQueue(silent = false) {
+  if (queueLoading) return;
+  queueLoading = true;
+  
+  if (!silent) {
+    const listEl = document.getElementById('queue-list');
+    if (listEl) {
+      listEl.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;gap:12px;">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div>
+          <div style="font-size:14px;color:var(--slate-500);font-weight:600;">Loading Queue from Google Sheets...</div>
+        </div>
+      `;
+    }
   }
 
-  const patients = getAll(KEYS.PATIENTS);
-  const todayStr = today();
-  const queue = getAll(KEYS.QUEUE).filter(q => {
-    const qDate = q.date ? q.date.toString().split('T')[0] : '';
-    return qDate === todayStr;
-  });
-  const waiting = queue.filter(q => q.status === 'Waiting').length;
-  const inConsult = queue.filter(q => q.status === 'In-Consultation').length;
-  const done = queue.filter(q => q.status === 'Done').length;
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl + "?action=get_records&sheet=QUEUE", {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
+    
+    if (!res.ok) throw new Error("Failed to fetch queue from Google Sheets");
+    const data = await res.json();
+    
+    if (data && data.success && Array.isArray(data.records)) {
+      const todayStr = today();
+      const mappedQueue = data.records.map(q => {
+        let qDate = q.Date || q.date || '';
+        if (qDate) {
+          qDate = qDate.toString().split('T')[0].split(' ')[0];
+        }
+        return {
+          id: q.QueueID || q.id || '',
+          token: parseInt(q.Token || q.token) || 0,
+          patientId: q.PatientID || q.patientId || '',
+          patientName: q.PatientName || q.patientName || '',
+          mobile: String(q.Mobile || q.mobile || ''),
+          date: qDate,
+          addedTime: q.AddedTime || q.addedTime || '',
+          type: q.Type || q.type || '',
+          status: q.Status || q.status || '',
+          appointmentId: q.AppointmentID || q.appointmentId || '',
+          isAppointment: (q.IsAppointment || q.isAppointment) === 'YES' || 
+                         (q.IsAppointment || q.isAppointment) === true
+        };
+      }).filter(q => q.date === todayStr);
 
+      // Auto-add today's scheduled appointments if they are not already in the queue
+      const todayAppts = getAll(KEYS.APPOINTMENTS)
+        .filter(a => {
+          const aDate = a.date ? a.date.toString().split('T')[0] : '';
+          return aDate === todayStr && a.status === 'Scheduled';
+        });
+
+      const allQueueForTodayAndSync = [...mappedQueue];
+
+      todayAppts.forEach(appt => {
+        const alreadyInQueue = mappedQueue
+          .some(q => q.appointmentId === appt.id && q.date === todayStr);
+        
+        if (!alreadyInQueue) {
+          const patient = getAll(KEYS.PATIENTS)
+            .find(p => p.mobile === appt.mobile || p.name === appt.patientName);
+          
+          const nextToken = allQueueForTodayAndSync.length > 0 
+            ? Math.max(...allQueueForTodayAndSync.map(q => q.token)) + 1 
+            : 1;
+          
+          const newQItem = {
+            id: 'Q-APT-' + appt.id,
+            token: nextToken,
+            patientId: patient ? patient.id : '',
+            patientName: appt.patientName,
+            mobile: appt.mobile,
+            date: todayStr,
+            addedTime: appt.time || '—',
+            type: appt.type || 'Appointment',
+            status: 'Waiting',
+            appointmentId: appt.id,
+            isAppointment: true
+          };
+
+          allQueueForTodayAndSync.push(newQItem);
+          mappedQueue.push(newQItem);
+
+          // Direct background add to Google Sheets
+          addAppointmentToQueueOnSheets(newQItem);
+        }
+      });
+
+      currentQueueData = mappedQueue;
+      // Also update localStorage as a fallback for other views (like dashboard)
+      saveAll(KEYS.QUEUE, mappedQueue);
+      
+      if (activeTab === 'queue') {
+        const waiting = mappedQueue.filter(q => q.status === 'Waiting').length;
+        const inConsult = mappedQueue.filter(q => q.status === 'In-Consultation').length;
+        const done = mappedQueue.filter(q => q.status === 'Done').length;
+        
+        const waitingEl = document.getElementById('q-waiting-val');
+        const inconsultEl = document.getElementById('q-inconsult-val');
+        const doneEl = document.getElementById('q-done-val');
+        
+        if (waitingEl) waitingEl.textContent = waiting;
+        if (inconsultEl) inconsultEl.textContent = inConsult;
+        if (doneEl) doneEl.textContent = done;
+        
+        renderQueueList(mappedQueue);
+      }
+    }
+  } catch (err) {
+    console.error("Error loading live queue:", err);
+    if (activeTab === 'queue' && !silent) {
+      const listEl = document.getElementById('queue-list');
+      if (listEl) {
+        listEl.innerHTML = `
+          <div class="alert alert-error" style="margin-top: 20px;">
+            ⚠️ Failed to load Queue from Google Sheets.
+            <button class="btn btn-secondary btn-sm" onclick="fetchLiveQueue()" style="margin-left: 12px; padding: 4px 8px; font-size: 11px;">🔄 Retry</button>
+          </div>
+        `;
+      }
+    }
+  } finally {
+    queueLoading = false;
+  }
+}
+
+async function addAppointmentToQueueOnSheets(newQItem) {
+  try {
+    const activeUrl = getSyncUrl();
+    await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "add_record",
+        sheet: "QUEUE",
+        record: newQItem
+      })
+    });
+  } catch (err) {
+    console.error("Failed to sync auto-added appointment to queue sheets:", err);
+  }
+}
+
+function renderQueue() {
   document.getElementById('content').innerHTML = `
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
     <div>
@@ -1129,24 +1230,24 @@ function renderQueue() {
   <div class="grid-3" style="margin-bottom:20px;">
     <div class="stat-card" style="border-left:4px solid var(--amber-600);">
       <div class="stat-icon">⏳</div>
-      <div class="stat-value" style="color:var(--amber-600);">${waiting}</div>
+      <div class="stat-value" id="q-waiting-val" style="color:var(--amber-600);">0</div>
       <div class="stat-label">Waiting</div>
     </div>
     <div class="stat-card" style="border-left:4px solid var(--teal-600);">
       <div class="stat-icon">🩺</div>
-      <div class="stat-value" style="color:var(--teal-600);">${inConsult}</div>
+      <div class="stat-value" id="q-inconsult-val" style="color:var(--teal-600);">0</div>
       <div class="stat-label">In Consultation</div>
     </div>
     <div class="stat-card" style="border-left:4px solid var(--emerald-600);">
       <div class="stat-icon">✅</div>
-      <div class="stat-value" style="color:var(--emerald-600);">${done}</div>
+      <div class="stat-value" id="q-done-val" style="color:var(--emerald-600);">0</div>
       <div class="stat-label">Done Today</div>
     </div>
   </div>
 
   <div id="queue-list"></div>`;
 
-  renderQueueList(queue);
+  fetchLiveQueue();
 }
 
 function renderQueueList(queue) {
@@ -1194,9 +1295,7 @@ function renderQueueList(queue) {
 }
 
 function showAddToQueue() {
-  const patients = getAll(KEYS.PATIENTS);
-  const queue = getAll(KEYS.QUEUE).filter(q => q.date === today());
-  const nextToken = queue.length > 0 ? Math.max(...queue.map(q => q.token)) + 1 : 1;
+  const nextToken = currentQueueData.length > 0 ? Math.max(...currentQueueData.map(q => q.token)) + 1 : 1;
 
   showModal(`
   <div class="modal-header">
@@ -1272,8 +1371,14 @@ async function saveToQueue(token) {
     document.getElementById('q-err').classList.remove('hidden'); 
     return; 
   }
-  const queue = getAll(KEYS.QUEUE);
-  queue.push({
+
+  const addBtn = document.querySelector('button[onclick^="saveToQueue"]');
+  if (addBtn) {
+    addBtn.disabled = true;
+    addBtn.textContent = 'Adding...';
+  }
+
+  const newRecord = {
     id: 'Q-' + Date.now(),
     token: token,
     patientId: pid,
@@ -1282,48 +1387,141 @@ async function saveToQueue(token) {
     date: today(),
     addedTime: new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'}),
     type: document.getElementById('q-type').value,
-    status: 'Waiting'
-  });
-  saveAll(KEYS.QUEUE, queue);
-  closeModal();
-  renderQueue();
-  
+    status: 'Waiting',
+    isAppointment: false
+  };
+
   try {
-    await syncToGoogleSheets();
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "add_record",
+        sheet: "QUEUE",
+        record: newRecord
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) {
+      throw new Error(result ? result.error : "Unknown error adding record");
+    }
+
+    // Also update locally
+    const queue = getAll(KEYS.QUEUE);
+    queue.push(newRecord);
+    saveAll(KEYS.QUEUE, queue);
+
+    closeModal();
+    renderQueue();
   } catch (err) {
-    console.error('Failed to sync queue addition to Google Sheets:', err);
-    alert('⚠️ Queue item added locally, but failed to sync to Google Sheets. Will retry in the background.');
+    console.error("Failed to add to queue:", err);
+    alert("⚠️ Failed to add patient to queue in Google Sheets: " + err.message);
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = `🎫 Add Token \${token}`;
+    }
   }
 }
 
 async function startQueueConsult(qid, pid) {
-  const queue = getAll(KEYS.QUEUE);
-  const idx = queue.findIndex(q => q.id === qid);
-  if (idx !== -1) {
-    queue[idx].status = 'In-Consultation';
-    saveAll(KEYS.QUEUE, queue);
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update_record",
+        sheet: "QUEUE",
+        idField: "QueueID",
+        id: qid,
+        updates: { status: "In-Consultation" }
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) {
+      throw new Error(result ? result.error : "Failed to update status");
+    }
+
+    // Update locally too
+    const queue = getAll(KEYS.QUEUE);
+    const idx = queue.findIndex(q => q.id === qid);
+    if (idx !== -1) {
+      queue[idx].status = 'In-Consultation';
+      saveAll(KEYS.QUEUE, queue);
+    }
+    const item = currentQueueData.find(q => q.id === qid);
+    if (item) item.status = 'In-Consultation';
+
+    startConsult(pid);
+  } catch (err) {
+    console.error("Failed to start consult in queue:", err);
+    alert("⚠️ Failed to update queue status on Google Sheets: " + err.message);
   }
-  startConsult(pid);
-  await syncToGoogleSheets();
 }
 
 async function markQueueDone(qid) {
-  const queue = getAll(KEYS.QUEUE);
-  const idx = queue.findIndex(q => q.id === qid);
-  if (idx !== -1) {
-    queue[idx].status = 'Done';
-    saveAll(KEYS.QUEUE, queue);
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update_record",
+        sheet: "QUEUE",
+        idField: "QueueID",
+        id: qid,
+        updates: { status: "Done" }
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) {
+      throw new Error(result ? result.error : "Failed to update status");
+    }
+
+    // Update locally too
+    const queue = getAll(KEYS.QUEUE);
+    const idx = queue.findIndex(q => q.id === qid);
+    if (idx !== -1) {
+      queue[idx].status = 'Done';
+      saveAll(KEYS.QUEUE, queue);
+    }
+
+    renderQueue();
+  } catch (err) {
+    console.error("Failed to mark done in queue:", err);
+    alert("⚠️ Failed to mark queue item as done on Google Sheets: " + err.message);
   }
-  renderQueue();
-  await syncToGoogleSheets();
 }
 
 async function removeFromQueue(qid) {
   if (!confirm('Remove this patient from queue?')) return;
-  const queue = getAll(KEYS.QUEUE).filter(q => q.id !== qid);
-  saveAll(KEYS.QUEUE, queue);
-  renderQueue();
-  await syncToGoogleSheets();
+  try {
+    const activeUrl = getSyncUrl();
+    const res = await fetch(activeUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "delete_record",
+        sheet: "QUEUE",
+        idField: "QueueID",
+        id: qid
+      })
+    });
+    const result = await res.json();
+    if (!result || !result.success) {
+      throw new Error(result ? result.error : "Failed to delete record");
+    }
+
+    // Update locally too
+    const queue = getAll(KEYS.QUEUE).filter(q => q.id !== qid);
+    saveAll(KEYS.QUEUE, queue);
+
+    renderQueue();
+  } catch (err) {
+    console.error("Failed to remove from queue:", err);
+    alert("⚠️ Failed to remove queue item from Google Sheets: " + err.message);
+  }
 }
 
 function getGreeting(){
